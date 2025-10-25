@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"math"
+	"strings"
 
 	"github.com/cloudless/cloudless/pkg/coordinator/membership"
 	"go.uber.org/zap"
@@ -192,6 +193,11 @@ func (s *Scorer) calculateCostScore(node *membership.NodeInfo, workload *Workloa
 
 	// For now, use a simple model based on resource efficiency
 
+	// Guard against division by zero
+	if node.Capacity.CPUMillicores == 0 || node.Capacity.MemoryBytes == 0 {
+		return 0 // Cannot score node with zero capacity
+	}
+
 	// Prefer nodes with resources that closely match requirements
 	cpuRatio := float64(workload.Resources.Requests.CPUMillicores) / float64(node.Capacity.CPUMillicores)
 	memRatio := float64(workload.Resources.Requests.MemoryBytes) / float64(node.Capacity.MemoryBytes)
@@ -224,6 +230,11 @@ func (s *Scorer) calculateCostScore(node *membership.NodeInfo, workload *Workloa
 
 // calculateUtilizationScore scores based on resource utilization balance
 func (s *Scorer) calculateUtilizationScore(node *membership.NodeInfo, workload *WorkloadSpec) float64 {
+	// Guard against division by zero
+	if node.Capacity.CPUMillicores == 0 || node.Capacity.MemoryBytes == 0 {
+		return 0 // Cannot score node with zero capacity
+	}
+
 	// Calculate current utilization
 	currentCPUUtil := float64(node.Usage.CPUMillicores) / float64(node.Capacity.CPUMillicores)
 	currentMemUtil := float64(node.Usage.MemoryBytes) / float64(node.Capacity.MemoryBytes)
@@ -283,9 +294,11 @@ func (s *Scorer) calculateNetworkPenalty(node *membership.NodeInfo, workload *Wo
 		}
 	}
 
-	// Penalty for missing public IP (if potentially needed for egress)
-	if node.NetworkInfo.PublicIP == "" {
-		penalty += 0.1
+	// Penalty for missing public IP (only if workload requires external access)
+	if workload.Annotations != nil && workload.Annotations["network.requirePublicIP"] == "true" {
+		if node.NetworkInfo.PublicIP == "" {
+			penalty += 0.1
+		}
 	}
 
 	// High penalty for network unavailability
@@ -296,16 +309,20 @@ func (s *Scorer) calculateNetworkPenalty(node *membership.NodeInfo, workload *Wo
 	}
 
 	// Penalty for missing required network features
-	for _, required := range workload.PlacementPolicy.NodeSelector {
-		found := false
-		for _, feature := range node.Capabilities.NetworkFeatures {
-			if feature == required {
-				found = true
-				break
+	// Check for labels with pattern "network.feature/<name>=required"
+	for labelKey, labelValue := range workload.PlacementPolicy.NodeSelector {
+		if strings.HasPrefix(labelKey, "network.feature/") && labelValue == "required" {
+			featureName := strings.TrimPrefix(labelKey, "network.feature/")
+			found := false
+			for _, feature := range node.Capabilities.NetworkFeatures {
+				if feature == featureName {
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			penalty += 0.3 // Missing required feature
+			if !found {
+				penalty += 0.3 // Missing required network feature
+			}
 		}
 	}
 
@@ -391,6 +408,13 @@ func (s *Scorer) nodeMatchesAffinity(node *membership.NodeInfo, affinity Affinit
 
 // UpdateWeights updates the scoring weights
 func (s *Scorer) UpdateWeights(config ScorerConfig) {
+	// Clamp negative weights to zero for consistency with constructor
+	config.LocalityWeight = math.Max(0, config.LocalityWeight)
+	config.ReliabilityWeight = math.Max(0, config.ReliabilityWeight)
+	config.CostWeight = math.Max(0, config.CostWeight)
+	config.UtilizationWeight = math.Max(0, config.UtilizationWeight)
+	config.NetworkPenaltyWeight = math.Max(0, config.NetworkPenaltyWeight)
+
 	// Normalize weights
 	total := config.LocalityWeight + config.ReliabilityWeight +
 			config.CostWeight + config.UtilizationWeight + config.NetworkPenaltyWeight

@@ -148,9 +148,12 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create coordinator: %w", err)
 	}
 
-	// Generate bootstrap tokens for development/testing
-	if err := generateBootstrapTokens(coord, logger); err != nil {
-		logger.Warn("Failed to generate bootstrap tokens", zap.Error(err))
+	// Generate bootstrap tokens for development/testing (only if explicitly enabled)
+	// SECURITY WARNING: Only enable in development environments, never in production
+	if os.Getenv("CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS") == "1" {
+		if err := generateBootstrapTokens(coord, logger); err != nil {
+			logger.Warn("Failed to generate bootstrap tokens", zap.Error(err))
+		}
 	}
 
 	// Start metrics server

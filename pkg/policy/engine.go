@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -376,14 +377,10 @@ func (e *Engine) getSortedPolicies() []*Policy {
 		}
 	}
 
-	// Sort by priority (higher first)
-	for i := 0; i < len(policies)-1; i++ {
-		for j := i + 1; j < len(policies); j++ {
-			if policies[i].Priority < policies[j].Priority {
-				policies[i], policies[j] = policies[j], policies[i]
-			}
-		}
-	}
+	// Sort by priority (higher first) using sort.Slice for better performance
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].Priority > policies[j].Priority
+	})
 
 	return policies
 }

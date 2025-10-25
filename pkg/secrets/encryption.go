@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"time"
 )
 
 // EnvelopeEncryptor handles envelope encryption for secrets

@@ -253,8 +253,8 @@ func (pe *ProbeExecutor) executeHTTPProbe(ctx context.Context, containerIP strin
 		req.Header.Set(key, value)
 	}
 
+	// Use context deadline for timeout control instead of hardcoded client timeout
 	client := &http.Client{
-		Timeout: 3 * time.Second,
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 		},
@@ -282,9 +282,8 @@ func (pe *ProbeExecutor) executeTCPProbe(ctx context.Context, containerIP string
 
 	address := fmt.Sprintf("%s:%d", containerIP, probe.Port)
 
-	dialer := net.Dialer{
-		Timeout: 3 * time.Second,
-	}
+	// Use context deadline for timeout control instead of hardcoded dialer timeout
+	dialer := net.Dialer{}
 
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {

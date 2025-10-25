@@ -312,3 +312,10 @@ refactoring plan
 
      The image pull error is expected - agents are using a dummy container runtime in this test environment. The important part is that scheduling
   works correctly
+
+
+    Note on Issue #8 (RAFT Initialization Order)
+
+  This issue has a structural dependency conflict: The Membership Manager constructor requires a Store interface (line 158-160 validation in
+  membership/manager.go), which is satisfied by RAFT Store. Moving RAFT initialization after Membership Manager would require architectural changes to use
+  dependency injection or a two-phase initialization pattern. This should be addressed in a separate architectural refactoring PR.

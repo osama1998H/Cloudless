@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -98,25 +99,26 @@ func (m *Manager) CreateSecret(namespace, name string, data map[string][]byte, o
 
 	// Encrypt each value
 	encryptedData := make(map[string][]byte)
-	var encryptedDataKey []byte
-	var nonce []byte
+	perKeyEDKs := make(map[string][]byte)
+	perKeyNonces := make(map[string][]byte)
 
 	for key, value := range data {
-		encrypted, encDataKey, n, err := m.encryptor.Encrypt(value)
+		encrypted, encDataKey, nonce, err := m.encryptor.Encrypt(value)
 		if err != nil {
 			return nil, fmt.Errorf("failed to encrypt secret value for key %s: %w", key, err)
 		}
 		encryptedData[key] = encrypted
-		encryptedDataKey = encDataKey // Use same data key for all values in this secret
-		nonce = n
+		perKeyEDKs[key] = encDataKey
+		perKeyNonces[key] = nonce
 	}
 
 	// Create secret
 	secret := &Secret{
-		Name:             name,
-		Namespace:        namespace,
-		Data:             encryptedData,
-		EncryptedDataKey: encryptedDataKey,
+		Name:      name,
+		Namespace: namespace,
+		Data:      encryptedData,
+		// EncryptedDataKey is kept for legacy compatibility but not used for new secrets
+		EncryptedDataKey: nil,
 		KeyID:            m.masterKey.ID,
 		Algorithm:        AlgorithmAES256GCM,
 		Version:          1,
@@ -129,11 +131,14 @@ func (m *Manager) CreateSecret(namespace, name string, data map[string][]byte, o
 		opt(secret)
 	}
 
-	// Store nonce in annotations (workaround for simplified storage)
+	// Store per-key EDKs and nonces in annotations
 	if secret.Annotations == nil {
 		secret.Annotations = make(map[string]string)
 	}
-	secret.Annotations["nonce"] = fmt.Sprintf("%x", nonce)
+	for key := range encryptedData {
+		secret.Annotations[fmt.Sprintf("edk.%s", key)] = fmt.Sprintf("%x", perKeyEDKs[key])
+		secret.Annotations[fmt.Sprintf("nonce.%s", key)] = fmt.Sprintf("%x", perKeyNonces[key])
+	}
 
 	// Save to store
 	if err := m.store.Save(secret); err != nil {
@@ -199,13 +204,38 @@ func (m *Manager) GetSecret(req SecretAccessRequest) (*SecretAccessResponse, err
 
 	// Decrypt data
 	decryptedData := make(map[string][]byte)
-	nonce := []byte(secret.Annotations["nonce"]) // Retrieve nonce from annotations
-	if len(nonce) == 0 {
-		return nil, fmt.Errorf("nonce not found for secret")
-	}
 
 	for key, encryptedValue := range secret.Data {
-		decrypted, err := m.encryptor.Decrypt(encryptedValue, secret.EncryptedDataKey, nonce)
+		// Try per-key metadata first (new format)
+		edkHex := secret.Annotations[fmt.Sprintf("edk.%s", key)]
+		nonceHex := secret.Annotations[fmt.Sprintf("nonce.%s", key)]
+
+		var edk, nonce []byte
+		var err error
+
+		if edkHex != "" && nonceHex != "" {
+			// New format: per-key metadata
+			edk, err = hex.DecodeString(edkHex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode EDK for key %s: %w", key, err)
+			}
+			nonce, err = hex.DecodeString(nonceHex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode nonce for key %s: %w", key, err)
+			}
+		} else {
+			// Legacy format: single metadata for all keys (backward compatibility)
+			if secret.EncryptedDataKey == nil || len(secret.Annotations["nonce"]) == 0 {
+				return nil, fmt.Errorf("encryption metadata not found for key %s", key)
+			}
+			edk = secret.EncryptedDataKey
+			nonce, err = hex.DecodeString(secret.Annotations["nonce"])
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode legacy nonce: %w", err)
+			}
+		}
+
+		decrypted, err := m.encryptor.Decrypt(encryptedValue, edk, nonce)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt secret value for key %s: %w", key, err)
 		}
@@ -312,23 +342,28 @@ func (m *Manager) UpdateSecret(namespace, name string, data map[string][]byte) (
 
 	// Encrypt new data
 	encryptedData := make(map[string][]byte)
-	var encryptedDataKey []byte
-	var nonce []byte
+	perKeyEDKs := make(map[string][]byte)
+	perKeyNonces := make(map[string][]byte)
 
 	for key, value := range data {
-		encrypted, encDataKey, n, err := m.encryptor.Encrypt(value)
+		encrypted, encDataKey, nonce, err := m.encryptor.Encrypt(value)
 		if err != nil {
 			return nil, fmt.Errorf("failed to encrypt secret value for key %s: %w", key, err)
 		}
 		encryptedData[key] = encrypted
-		encryptedDataKey = encDataKey
-		nonce = n
+		perKeyEDKs[key] = encDataKey
+		perKeyNonces[key] = nonce
 	}
 
 	// Update secret
 	secret.Data = encryptedData
-	secret.EncryptedDataKey = encryptedDataKey
-	secret.Annotations["nonce"] = fmt.Sprintf("%x", nonce)
+	// Clear legacy metadata
+	secret.EncryptedDataKey = nil
+	// Store per-key EDKs and nonces in annotations
+	for key := range encryptedData {
+		secret.Annotations[fmt.Sprintf("edk.%s", key)] = fmt.Sprintf("%x", perKeyEDKs[key])
+		secret.Annotations[fmt.Sprintf("nonce.%s", key)] = fmt.Sprintf("%x", perKeyNonces[key])
+	}
 	secret.Version++
 	secret.UpdatedAt = time.Now()
 

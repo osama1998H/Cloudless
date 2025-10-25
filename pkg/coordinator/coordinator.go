@@ -197,8 +197,8 @@ func New(config *Config) (*Coordinator, error) {
 	if err != nil {
 		config.Logger.Warn("Failed to generate bootstrap token", zap.Error(err))
 	} else {
+		// SECURITY: Never log raw tokens, only token IDs
 		config.Logger.Info("Generated bootstrap token for development",
-			zap.String("token", bootstrapToken.Token),
 			zap.String("token_id", bootstrapToken.ID),
 			zap.Time("expires_at", bootstrapToken.ExpiresAt),
 			zap.Int("max_uses", bootstrapToken.MaxUses),

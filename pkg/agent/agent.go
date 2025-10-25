@@ -976,29 +976,37 @@ func (a *Agent) runWorkload(ctx context.Context, workload *api.Workload, fragmen
 		})
 	}
 
-	// Map resources
-	resources := runtime.ResourceRequirements{
-		Requests: runtime.ResourceList{
-			CPUMillicores: spec.Resources.Requests.CpuMillicores,
-			MemoryBytes:   spec.Resources.Requests.MemoryBytes,
-			StorageBytes:  spec.Resources.Requests.StorageBytes,
-		},
-		Limits: runtime.ResourceList{
-			CPUMillicores: spec.Resources.Limits.CpuMillicores,
-			MemoryBytes:   spec.Resources.Limits.MemoryBytes,
-			StorageBytes:  spec.Resources.Limits.StorageBytes,
-		},
+	// Map resources with nil-safety
+	resources := runtime.ResourceRequirements{}
+	if spec.Resources != nil {
+		if spec.Resources.Requests != nil {
+			resources.Requests = runtime.ResourceList{
+				CPUMillicores: spec.Resources.Requests.CpuMillicores,
+				MemoryBytes:   spec.Resources.Requests.MemoryBytes,
+				StorageBytes:  spec.Resources.Requests.StorageBytes,
+			}
+		}
+		if spec.Resources.Limits != nil {
+			resources.Limits = runtime.ResourceList{
+				CPUMillicores: spec.Resources.Limits.CpuMillicores,
+				MemoryBytes:   spec.Resources.Limits.MemoryBytes,
+				StorageBytes:  spec.Resources.Limits.StorageBytes,
+			}
+		}
 	}
 
-	// Map restart policy
+	// Map restart policy with nil-safety
 	restartPolicy := runtime.RestartPolicy{
 		Name:              "on-failure",
-		MaximumRetryCount: int(spec.RestartPolicy.MaxRetries),
+		MaximumRetryCount: 3, // Default
 	}
-	if spec.RestartPolicy.Policy == 0 { // ALWAYS
-		restartPolicy.Name = "always"
-	} else if spec.RestartPolicy.Policy == 2 { // NEVER
-		restartPolicy.Name = "no"
+	if spec.RestartPolicy != nil {
+		restartPolicy.MaximumRetryCount = int(spec.RestartPolicy.MaxRetries)
+		if spec.RestartPolicy.Policy == 0 { // ALWAYS
+			restartPolicy.Name = "always"
+		} else if spec.RestartPolicy.Policy == 2 { // NEVER
+			restartPolicy.Name = "no"
+		}
 	}
 
 	// Create container spec

@@ -442,6 +442,10 @@ func (e *Evaluator) matchesPattern(value, pattern string) bool {
 	// * matches any characters
 	// ? matches single character
 
+	// Lowercase both value and pattern for case-insensitive matching (per DNS spec)
+	value = strings.ToLower(value)
+	pattern = strings.ToLower(pattern)
+
 	regexPattern := "^" + regexp.QuoteMeta(pattern) + "$"
 	regexPattern = strings.ReplaceAll(regexPattern, "\\*", ".*")
 	regexPattern = strings.ReplaceAll(regexPattern, "\\?", ".")
