@@ -1,3 +1,6 @@
+//go:build benchmark
+// +build benchmark
+
 package observability
 
 import (
@@ -100,11 +103,12 @@ func BenchmarkTracingOverhead(b *testing.B) {
 
 	// Create tracer provider with sampling
 	config := TracerConfig{
+		Enabled:        true,
 		ServiceName:    "benchmark-test",
 		ServiceVersion: "1.0.0",
-		OTLPEndpoint:   "localhost:4317",
-		SamplingRate:   1.0, // Always sample for benchmark
-		Environment:    "test",
+		Endpoint:       "localhost:4317",
+		SampleRate:     1.0, // Always sample for benchmark
+		Insecure:       true,
 	}
 
 	provider, err := NewTracerProvider(config, logger)
@@ -142,11 +146,12 @@ func BenchmarkSpanCreation(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
 
 	config := TracerConfig{
+		Enabled:        true,
 		ServiceName:    "benchmark-test",
 		ServiceVersion: "1.0.0",
-		OTLPEndpoint:   "localhost:4317",
-		SamplingRate:   1.0,
-		Environment:    "test",
+		Endpoint:       "localhost:4317",
+		SampleRate:     1.0,
+		Insecure:       true,
 	}
 
 	provider, err := NewTracerProvider(config, logger)
@@ -174,11 +179,12 @@ func BenchmarkSpanWithAttributes(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
 
 	config := TracerConfig{
+		Enabled:        true,
 		ServiceName:    "benchmark-test",
 		ServiceVersion: "1.0.0",
-		OTLPEndpoint:   "localhost:4317",
-		SamplingRate:   1.0,
-		Environment:    "test",
+		Endpoint:       "localhost:4317",
+		SampleRate:     1.0,
+		Insecure:       true,
 	}
 
 	provider, err := NewTracerProvider(config, logger)

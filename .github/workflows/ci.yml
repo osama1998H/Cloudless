@@ -125,7 +125,7 @@ jobs:
           CGO_ENABLED=0 make build-platform
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cloudless-${{ steps.platform.outputs.GOOS }}-${{ steps.platform.outputs.GOARCH }}
           path: build/${{ steps.platform.outputs.GOOS }}-${{ steps.platform.outputs.GOARCH }}/*
@@ -170,7 +170,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -180,7 +180,7 @@ jobs:
           args: '-fmt sarif -out gosec-results.sarif ./...'
 
       - name: Upload gosec results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'gosec-results.sarif'
 
