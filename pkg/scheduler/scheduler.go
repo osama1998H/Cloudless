@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 	"sync"
 	"time"
@@ -605,20 +604,162 @@ func (s *Scheduler) Reschedule(ctx context.Context, workload *WorkloadSpec, fail
 }
 
 // PreemptWorkloads handles preemption for higher priority workloads
+// Returns a list of workload IDs that should be preempted to make room
 func (s *Scheduler) PreemptWorkloads(ctx context.Context, workload *WorkloadSpec) ([]string, error) {
-	// Find lower priority workloads that can be preempted
-	// This is a simplified implementation
-	preempted := []string{}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if workload.Priority > 100 { // High priority threshold
-		s.logger.Info("Considering preemption for high-priority workload",
+	preemptedWorkloads := []string{}
+
+	// Only consider preemption for high priority workloads (priority > 100)
+	if workload.Priority <= 100 {
+		s.logger.Debug("Workload priority too low for preemption",
 			zap.String("workload_id", workload.ID),
 			zap.Int("priority", workload.Priority),
 		)
-		// TODO: Implement preemption logic
+		return preemptedWorkloads, nil
 	}
 
-	return preempted, nil
+	s.logger.Info("Considering preemption for high-priority workload",
+		zap.String("workload_id", workload.ID),
+		zap.Int("priority", workload.Priority),
+	)
+
+	// Get all nodes
+	nodes, err := s.membershipManager.ListNodes(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	// Calculate total resources needed
+	totalNeeded := ResourceSpec{
+		CPUMillicores: workload.Resources.Requests.CPUMillicores * int64(workload.Replicas),
+		MemoryBytes:   workload.Resources.Requests.MemoryBytes * int64(workload.Replicas),
+		StorageBytes:  workload.Resources.Requests.StorageBytes * int64(workload.Replicas),
+		BandwidthBPS:  workload.Resources.Requests.BandwidthBPS * int64(workload.Replicas),
+		GPUCount:      workload.Resources.Requests.GPUCount * int32(workload.Replicas),
+	}
+
+	s.logger.Debug("Resources needed for preemption",
+		zap.Int64("cpu_millicores", totalNeeded.CPUMillicores),
+		zap.Int64("memory_bytes", totalNeeded.MemoryBytes),
+	)
+
+	// Build preemption candidates: lower priority workloads
+	type PreemptionCandidate struct {
+		WorkloadID string
+		Priority   int
+		NodeID     string
+		Resources  ResourceSpec
+	}
+
+	candidates := []PreemptionCandidate{}
+
+	// Scan all nodes for lower priority workloads
+	for _, node := range nodes {
+		// Skip nodes that are draining or offline
+		if node.State == "draining" || node.State == "offline" || node.State == "failed" {
+			continue
+		}
+
+		// Examine containers on this node
+		for _, container := range node.Containers {
+			// We need to know the workload priority, but containers don't store it
+			// For now, we'll assume any workload with priority < current is preemptible
+			// In production, you'd track workload metadata separately
+
+			// Skip if no workload ID
+			if container.WorkloadID == "" {
+				continue
+			}
+
+			// Estimate resources from container usage (simplified)
+			// In production, you'd track actual workload resource requests
+			candidate := PreemptionCandidate{
+				WorkloadID: container.WorkloadID,
+				Priority:   50, // Assume lower priority if not specified
+				NodeID:     node.ID,
+				Resources: ResourceSpec{
+					CPUMillicores: container.Usage.CPUMillicores,
+					MemoryBytes:   container.Usage.MemoryBytes,
+					StorageBytes:  container.Usage.StorageBytes,
+					BandwidthBPS:  container.Usage.BandwidthBPS,
+					GPUCount:      container.Usage.GPUCount,
+				},
+			}
+
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	s.logger.Info("Found preemption candidates",
+		zap.Int("candidate_count", len(candidates)),
+	)
+
+	if len(candidates) == 0 {
+		s.logger.Warn("No preemption candidates found")
+		return preemptedWorkloads, nil
+	}
+
+	// Sort candidates by priority (lowest first) to preempt lowest priority first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Priority < candidates[j].Priority
+	})
+
+	// Greedy algorithm: select candidates until we have enough resources
+	var freedCPU, freedMemory, freedStorage, freedBandwidth int64
+	var freedGPU int32
+
+	for _, candidate := range candidates {
+		// Check if we already have enough resources
+		if freedCPU >= totalNeeded.CPUMillicores &&
+			freedMemory >= totalNeeded.MemoryBytes &&
+			freedStorage >= totalNeeded.StorageBytes &&
+			freedBandwidth >= totalNeeded.BandwidthBPS &&
+			freedGPU >= totalNeeded.GPUCount {
+			break
+		}
+
+		// Add this candidate to preemption list
+		preemptedWorkloads = append(preemptedWorkloads, candidate.WorkloadID)
+		freedCPU += candidate.Resources.CPUMillicores
+		freedMemory += candidate.Resources.MemoryBytes
+		freedStorage += candidate.Resources.StorageBytes
+		freedBandwidth += candidate.Resources.BandwidthBPS
+		freedGPU += candidate.Resources.GPUCount
+
+		s.logger.Info("Selected workload for preemption",
+			zap.String("workload_id", candidate.WorkloadID),
+			zap.String("node_id", candidate.NodeID),
+			zap.Int("priority", candidate.Priority),
+			zap.Int64("freed_cpu", candidate.Resources.CPUMillicores),
+			zap.Int64("freed_memory", candidate.Resources.MemoryBytes),
+		)
+	}
+
+	// Verify we freed enough resources
+	if freedCPU < totalNeeded.CPUMillicores ||
+		freedMemory < totalNeeded.MemoryBytes ||
+		freedStorage < totalNeeded.StorageBytes ||
+		freedBandwidth < totalNeeded.BandwidthBPS ||
+		freedGPU < totalNeeded.GPUCount {
+		s.logger.Warn("Preemption would not free enough resources",
+			zap.Int64("needed_cpu", totalNeeded.CPUMillicores),
+			zap.Int64("freed_cpu", freedCPU),
+			zap.Int64("needed_memory", totalNeeded.MemoryBytes),
+			zap.Int64("freed_memory", freedMemory),
+		)
+		// Return empty list if preemption wouldn't help
+		return []string{}, nil
+	}
+
+	s.logger.Info("Preemption plan created",
+		zap.Int("workloads_to_preempt", len(preemptedWorkloads)),
+		zap.Int64("freed_cpu", freedCPU),
+		zap.Int64("freed_memory", freedMemory),
+	)
+
+	return preemptedWorkloads, nil
 }
 
 // UpdateSchedulerConfig updates the scheduler configuration

@@ -12,6 +12,7 @@ import (
 	"github.com/cloudless/cloudless/pkg/mtls"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (
@@ -38,8 +39,14 @@ type Manager struct {
 	nodes          map[string]*NodeInfo
 	healthMonitor  *HealthMonitor
 	scoringEngine  *ScoringEngine
-	mu             sync.RWMutex
-	stopCh         chan struct{}
+
+	// Workload assignment tracking
+	pendingAssignments map[string][]*api.WorkloadAssignment // nodeID -> assignments
+	pendingCommands    map[string][]string                 // nodeID -> commands
+	assignmentMu       sync.RWMutex                         // protects assignment maps
+
+	mu     sync.RWMutex
+	stopCh chan struct{}
 }
 
 // NodeInfo represents comprehensive node information
@@ -162,12 +169,14 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 	}
 
 	m := &Manager{
-		store:         config.Store,
-		tokenManager:  config.TokenManager,
-		certManager:   config.CertManager,
-		logger:        config.Logger,
-		nodes:         make(map[string]*NodeInfo),
-		stopCh:        make(chan struct{}),
+		store:              config.Store,
+		tokenManager:       config.TokenManager,
+		certManager:        config.CertManager,
+		logger:             config.Logger,
+		nodes:              make(map[string]*NodeInfo),
+		pendingAssignments: make(map[string][]*api.WorkloadAssignment),
+		pendingCommands:    make(map[string][]string),
+		stopCh:             make(chan struct{}),
 	}
 
 	// Initialize health monitor
@@ -318,19 +327,19 @@ func (m *Manager) EnrollNode(ctx context.Context, req *api.EnrollNodeRequest) (*
 		// Continue anyway, will be saved on next update
 	}
 
-	// Get CA certificate
-	caCert := m.certManager.GetCACertificate()
-
 	m.logger.Info("Node enrolled successfully",
 		zap.String("node_id", nodeID),
 		zap.String("node_name", req.NodeName),
 	)
 
-	// Create response
+	// Create response with proper duration
+	heartbeatDuration := durationpb.New(DefaultHeartbeatInterval)
+
 	response := &api.EnrollNodeResponse{
-		Success:           true,
+		NodeId:            nodeID,
 		Certificate:       cert.CertPEM,
-		HeartbeatInterval: time.Now().Add(DefaultHeartbeatInterval),
+		CaCertificate:     []byte{}, // TODO: Add CA certificate
+		HeartbeatInterval: heartbeatDuration,
 	}
 
 	return response, nil
@@ -379,9 +388,10 @@ func (m *Manager) ProcessHeartbeat(ctx context.Context, req *api.HeartbeatReques
 	// Update fragments
 	if req.Fragments != nil {
 		node.Fragments = make([]FragmentInfo, 0, len(req.Fragments))
-		for _, f := range req.Fragments {
+		for _, frag := range req.Fragments {
 			node.Fragments = append(node.Fragments, FragmentInfo{
-				// Map from protobuf
+				// TODO: Map fields from protobuf FragmentStatus
+				State: frag.GetState().String(),
 			})
 		}
 	}
@@ -403,15 +413,57 @@ func (m *Manager) ProcessHeartbeat(ctx context.Context, req *api.HeartbeatReques
 		m.logger.Error("Failed to persist node updates", zap.Error(err))
 	}
 
-	// Create response
-	response := &api.HeartbeatResponse{
-		Assignments:      []*api.WorkloadAssignment{},
-		Commands:         []string{},
-		NextHeartbeat:    time.Now().Add(node.HeartbeatInterval),
+	// Get pending assignments and commands for this node
+	m.assignmentMu.Lock()
+	assignments := m.pendingAssignments[req.NodeId]
+	commands := m.pendingCommands[req.NodeId]
+
+	// Clear pending assignments and commands after retrieving
+	delete(m.pendingAssignments, req.NodeId)
+	delete(m.pendingCommands, req.NodeId)
+	m.assignmentMu.Unlock()
+
+	// Log if we're sending assignments or commands
+	if len(assignments) > 0 {
+		m.logger.Info("Sending workload assignments to node",
+			zap.String("node_id", req.NodeId),
+			zap.Int("count", len(assignments)),
+		)
 	}
 
-	// TODO: Check for new workload assignments
-	// TODO: Check for containers to stop
+	if len(commands) > 0 {
+		m.logger.Info("Sending commands to node",
+			zap.String("node_id", req.NodeId),
+			zap.Int("count", len(commands)),
+		)
+	}
+
+	// Check for containers that need to be stopped (based on node state)
+	if node.State == StateDraining {
+		// Add drain command if not already present
+		drainCommandFound := false
+		for _, cmd := range commands {
+			if cmd == "drain:graceful" {
+				drainCommandFound = true
+				break
+			}
+		}
+		if !drainCommandFound {
+			commands = append(commands, "drain:graceful")
+			m.logger.Info("Added drain command to node",
+				zap.String("node_id", req.NodeId),
+			)
+		}
+	}
+
+	// Create response with proper duration
+	nextHeartbeat := durationpb.New(node.HeartbeatInterval)
+
+	response := &api.HeartbeatResponse{
+		Assignments:      assignments,
+		ContainersToStop: commands,
+		NextHeartbeat:    nextHeartbeat,
+	}
 
 	return response, nil
 }
@@ -480,7 +532,15 @@ func (m *Manager) DrainNode(nodeID string, graceful bool, timeout time.Duration)
 		zap.Duration("timeout", timeout),
 	)
 
-	// TODO: Trigger workload migration
+	// Trigger workload migration
+	// This initiates the process of moving all workloads off the draining node
+	if err := m.triggerWorkloadMigration(nodeID, graceful, timeout); err != nil {
+		m.logger.Error("Failed to trigger workload migration",
+			zap.String("node_id", nodeID),
+			zap.Error(err),
+		)
+		// Continue anyway - the drain command will be sent on next heartbeat
+	}
 
 	return nil
 }
@@ -750,4 +810,127 @@ func addCondition(node *NodeInfo, condType, status, reason, message string) {
 		Message:        message,
 		LastTransition: now,
 	})
+}
+
+// QueueAssignment adds a workload assignment to the pending queue for a node
+// This method is called by the scheduler after making placement decisions
+func (m *Manager) QueueAssignment(nodeID string, assignment *api.WorkloadAssignment) error {
+	m.assignmentMu.Lock()
+	defer m.assignmentMu.Unlock()
+
+	// Check if node exists
+	m.mu.RLock()
+	_, exists := m.nodes[nodeID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	m.pendingAssignments[nodeID] = append(m.pendingAssignments[nodeID], assignment)
+
+	m.logger.Debug("Queued workload assignment",
+		zap.String("node_id", nodeID),
+		zap.String("fragment_id", assignment.FragmentId),
+	)
+
+	return nil
+}
+
+// QueueCommand adds a command to the pending queue for a node
+// This method is called to send administrative commands to nodes
+func (m *Manager) QueueCommand(nodeID string, command string) error {
+	m.assignmentMu.Lock()
+	defer m.assignmentMu.Unlock()
+
+	// Check if node exists
+	m.mu.RLock()
+	_, exists := m.nodes[nodeID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	m.pendingCommands[nodeID] = append(m.pendingCommands[nodeID], command)
+
+	m.logger.Debug("Queued command for node",
+		zap.String("node_id", nodeID),
+		zap.String("command", command),
+	)
+
+	return nil
+}
+
+// triggerWorkloadMigration initiates migration of all workloads from a draining node
+func (m *Manager) triggerWorkloadMigration(nodeID string, graceful bool, timeout time.Duration) error {
+	m.mu.RLock()
+	node, exists := m.nodes[nodeID]
+	if !exists {
+		m.mu.RUnlock()
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	// Get list of containers on the node
+	containers := make([]ContainerInfo, len(node.Containers))
+	copy(containers, node.Containers)
+	m.mu.RUnlock()
+
+	m.logger.Info("Triggering workload migration",
+		zap.String("node_id", nodeID),
+		zap.Int("container_count", len(containers)),
+		zap.Bool("graceful", graceful),
+	)
+
+	// Queue stop commands for all containers on the draining node
+	for _, container := range containers {
+		var stopCmd string
+		if graceful {
+			stopCmd = fmt.Sprintf("stop:graceful:%s", container.ID)
+		} else {
+			stopCmd = fmt.Sprintf("stop:force:%s", container.ID)
+		}
+
+		if err := m.QueueCommand(nodeID, stopCmd); err != nil {
+			m.logger.Error("Failed to queue stop command",
+				zap.String("node_id", nodeID),
+				zap.String("container_id", container.ID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		m.logger.Debug("Queued container stop command",
+			zap.String("node_id", nodeID),
+			zap.String("container_id", container.ID),
+			zap.String("workload_id", container.WorkloadID),
+		)
+	}
+
+	// NOTE: The actual rescheduling of workloads is handled by the scheduler
+	// The scheduler should detect that workloads are missing their desired replica count
+	// and automatically reschedule them to other available nodes
+	//
+	// In a production implementation, you would:
+	// 1. Get the workload IDs from the containers
+	// 2. Call the scheduler to reschedule each workload
+	// 3. Queue the new assignments to the target nodes
+	//
+	// For now, we're just stopping the containers and letting the reconciliation
+	// loop handle the rescheduling
+
+	m.logger.Info("Workload migration initiated",
+		zap.String("node_id", nodeID),
+		zap.Int("containers_to_stop", len(containers)),
+	)
+
+	return nil
+}
+
+// GetPendingAssignmentCount returns the number of pending assignments for a node
+func (m *Manager) GetPendingAssignmentCount(nodeID string) int {
+	m.assignmentMu.RLock()
+	defer m.assignmentMu.RUnlock()
+
+	return len(m.pendingAssignments[nodeID])
 }

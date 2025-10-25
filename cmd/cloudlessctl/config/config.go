@@ -110,6 +110,28 @@ func (c *Config) NewCoordinatorClient() (api.CoordinatorServiceClient, *grpc.Cli
 	return client, conn, nil
 }
 
+// NewStorageClient creates a new storage service client
+func (c *Config) NewStorageClient() (api.StorageServiceClient, *grpc.ClientConn, error) {
+	conn, err := c.NewGRPCClient()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client := api.NewStorageServiceClient(conn)
+	return client, conn, nil
+}
+
+// NewNetworkClient creates a new network service client
+func (c *Config) NewNetworkClient() (api.NetworkServiceClient, *grpc.ClientConn, error) {
+	conn, err := c.NewGRPCClient()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client := api.NewNetworkServiceClient(conn)
+	return client, conn, nil
+}
+
 // loadTLSConfig loads TLS configuration for mTLS
 func (c *Config) loadTLSConfig() (*tls.Config, error) {
 	// Load client cert

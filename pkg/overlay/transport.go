@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/quic-go/quic-go"
@@ -343,30 +344,49 @@ func (s *QUICStream) StreamID() uint64 {
 
 // extractPeerIDFromConn extracts the peer ID from a QUIC connection's TLS certificate
 func extractPeerIDFromConn(conn quic.Connection) string {
-	// In a production system, we would extract the peer ID from the TLS certificate
-	// For now, use the remote address as a fallback
-	// TODO: Extract from certificate CN or SAN
+	// Extract peer ID from TLS certificate following priority:
+	// 1. SPIFFE URI from SAN (most secure)
+	// 2. DNS names from SAN
+	// 3. Common Name from Subject
+	// 4. Remote address (fallback)
+
 	connState := conn.ConnectionState()
 	if len(connState.TLS.PeerCertificates) > 0 {
 		cert := connState.TLS.PeerCertificates[0]
-		// Extract from Common Name or Subject Alternative Name
+
+		// Priority 1: Try SPIFFE URIs in SAN (SPIFFE-compatible workload identity)
+		for _, uri := range cert.URIs {
+			if uri.Scheme == "spiffe" {
+				// Parse SPIFFE ID: spiffe://cloudless/node/{nodeID} or spiffe://cloudless/workload/{workloadID}
+				// Extract the last path component as the ID
+				path := uri.Path
+				if len(path) > 0 {
+					// Remove leading slash
+					if path[0] == '/' {
+						path = path[1:]
+					}
+					// For paths like "node/node-123" or "workload/wl-456", extract the last component
+					parts := strings.Split(path, "/")
+					if len(parts) > 0 {
+						return parts[len(parts)-1]
+					}
+				}
+			}
+		}
+
+		// Priority 2: Try DNS names from SAN
+		if len(cert.DNSNames) > 0 {
+			// Use the first DNS name
+			return cert.DNSNames[0]
+		}
+
+		// Priority 3: Extract from Common Name
 		if cert.Subject.CommonName != "" {
 			return cert.Subject.CommonName
 		}
-		// Try URIs in SAN
-		for _, uri := range cert.URIs {
-			if uri.Scheme == "spiffe" {
-				// Parse SPIFFE ID: spiffe://cloudless/node/{nodeID}
-				path := uri.Path
-				if len(path) > 0 && path[0] == '/' {
-					path = path[1:]
-				}
-				return path
-			}
-		}
 	}
 
-	// Fallback to remote address
+	// Priority 4: Fallback to remote address (least secure, for development only)
 	return conn.RemoteAddr().String()
 }
 

@@ -49,6 +49,60 @@ service AgentService {
   rpc GetFragments(GetFragmentsRequest) returns (GetFragmentsResponse);
 }
 
+// StorageService handles distributed storage operations
+service StorageService {
+  // Bucket management
+  rpc CreateBucket(CreateBucketRequest) returns (Bucket);
+  rpc GetBucket(GetBucketRequest) returns (Bucket);
+  rpc ListBuckets(ListBucketsRequest) returns (ListBucketsResponse);
+  rpc DeleteBucket(DeleteBucketRequest) returns (google.protobuf.Empty);
+  rpc UpdateBucket(UpdateBucketRequest) returns (Bucket);
+
+  // Object operations
+  rpc PutObject(stream PutObjectRequest) returns (PutObjectResponse);
+  rpc GetObject(GetObjectRequest) returns (stream GetObjectResponse);
+  rpc HeadObject(HeadObjectRequest) returns (ObjectMetadata);
+  rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);
+  rpc DeleteObject(DeleteObjectRequest) returns (google.protobuf.Empty);
+  rpc CopyObject(CopyObjectRequest) returns (ObjectMetadata);
+
+  // Volume management
+  rpc CreateVolume(CreateVolumeRequest) returns (Volume);
+  rpc GetVolume(GetVolumeRequest) returns (Volume);
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
+  rpc DeleteVolume(DeleteVolumeRequest) returns (google.protobuf.Empty);
+  rpc AttachVolume(AttachVolumeRequest) returns (google.protobuf.Empty);
+  rpc DetachVolume(DetachVolumeRequest) returns (google.protobuf.Empty);
+
+  // Chunk management (internal)
+  rpc GetChunkLocations(GetChunkLocationsRequest) returns (GetChunkLocationsResponse);
+  rpc ReplicateChunk(ReplicateChunkRequest) returns (google.protobuf.Empty);
+}
+
+// NetworkService handles service discovery and load balancing
+service NetworkService {
+  // Service management
+  rpc CreateService(CreateServiceRequest) returns (Service);
+  rpc GetService(GetServiceRequest) returns (Service);
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+  rpc DeleteService(DeleteServiceRequest) returns (google.protobuf.Empty);
+  rpc UpdateService(UpdateServiceRequest) returns (Service);
+
+  // Endpoint management
+  rpc RegisterEndpoint(RegisterEndpointRequest) returns (Endpoint);
+  rpc DeregisterEndpoint(DeregisterEndpointRequest) returns (google.protobuf.Empty);
+  rpc ListEndpoints(ListEndpointsRequest) returns (ListEndpointsResponse);
+  rpc UpdateEndpointHealth(UpdateEndpointHealthRequest) returns (google.protobuf.Empty);
+
+  // Load balancer operations
+  rpc GetLoadBalancerConfig(GetLoadBalancerConfigRequest) returns (LoadBalancerConfig);
+  rpc UpdateLoadBalancerConfig(UpdateLoadBalancerConfigRequest) returns (LoadBalancerConfig);
+
+  // DNS and discovery
+  rpc ResolveService(ResolveServiceRequest) returns (ResolveServiceResponse);
+  rpc WatchServiceEndpoints(WatchServiceEndpointsRequest) returns (stream ServiceEndpointEvent);
+}
+
 // ============================================================================
 // Common Messages
 // ============================================================================
@@ -540,4 +594,373 @@ message GetFragmentsRequest {
 
 message GetFragmentsResponse {
   repeated Fragment fragments = 1;
+}
+
+// ============================================================================
+// Storage Service Messages
+// ============================================================================
+
+// Bucket represents a storage bucket
+message Bucket {
+  string id = 1;
+  string name = 2;
+  string namespace = 3;
+  BucketSpec spec = 4;
+  BucketStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  map<string, string> labels = 7;
+}
+
+message BucketSpec {
+  int32 replication_factor = 1;
+  string storage_class = 2;  // hot, cold, archive
+  bool versioning_enabled = 3;
+  google.protobuf.Duration retention_period = 4;
+  int64 quota_bytes = 5;
+}
+
+message BucketStatus {
+  int64 object_count = 1;
+  int64 total_bytes = 2;
+  int64 used_bytes = 3;
+}
+
+// Object metadata
+message ObjectMetadata {
+  string bucket = 1;
+  string key = 2;
+  int64 size = 3;
+  string content_type = 4;
+  string checksum = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp modified_at = 7;
+  map<string, string> metadata = 8;
+  repeated string chunk_ids = 9;
+  int32 replication_factor = 10;
+}
+
+// Volume represents a persistent volume
+message VolumeSpec {
+  string name = 1;
+  int64 size_bytes = 2;
+  string storage_class = 3;
+  string access_mode = 4;  // ReadWriteOnce, ReadOnlyMany, ReadWriteMany
+  repeated string node_affinity = 5;
+}
+
+// Storage requests
+message CreateBucketRequest {
+  Bucket bucket = 1;
+}
+
+message GetBucketRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message ListBucketsRequest {
+  string namespace = 1;
+  int32 limit = 2;
+  string continue_token = 3;
+}
+
+message ListBucketsResponse {
+  repeated Bucket buckets = 1;
+  string next_token = 2;
+}
+
+message DeleteBucketRequest {
+  string name = 1;
+  string namespace = 2;
+  bool force = 3;
+}
+
+message UpdateBucketRequest {
+  Bucket bucket = 1;
+  repeated string update_mask = 2;
+}
+
+message PutObjectRequest {
+  oneof data {
+    ObjectMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message PutObjectResponse {
+  ObjectMetadata metadata = 1;
+}
+
+message GetObjectRequest {
+  string bucket = 1;
+  string key = 2;
+  int64 offset = 3;
+  int64 length = 4;
+}
+
+message GetObjectResponse {
+  oneof data {
+    ObjectMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message HeadObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message ListObjectsRequest {
+  string bucket = 1;
+  string prefix = 2;
+  string delimiter = 3;
+  int32 max_keys = 4;
+  string continuation_token = 5;
+}
+
+message ListObjectsResponse {
+  repeated ObjectMetadata objects = 1;
+  repeated string common_prefixes = 2;
+  string next_continuation_token = 3;
+  bool is_truncated = 4;
+}
+
+message DeleteObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message CopyObjectRequest {
+  string source_bucket = 1;
+  string source_key = 2;
+  string dest_bucket = 3;
+  string dest_key = 4;
+}
+
+message CreateVolumeRequest {
+  Volume volume = 1;
+}
+
+message GetVolumeRequest {
+  string volume_id = 1;
+}
+
+message ListVolumesRequest {
+  string namespace = 1;
+  map<string, string> label_selector = 2;
+  int32 limit = 3;
+  string continue_token = 4;
+}
+
+message ListVolumesResponse {
+  repeated Volume volumes = 1;
+  string next_token = 2;
+}
+
+message DeleteVolumeRequest {
+  string volume_id = 1;
+  bool force = 2;
+}
+
+message AttachVolumeRequest {
+  string volume_id = 1;
+  string node_id = 2;
+  string workload_id = 3;
+}
+
+message DetachVolumeRequest {
+  string volume_id = 1;
+  string node_id = 2;
+}
+
+message GetChunkLocationsRequest {
+  string chunk_id = 1;
+}
+
+message GetChunkLocationsResponse {
+  repeated ChunkLocation locations = 1;
+}
+
+message ChunkLocation {
+  string chunk_id = 1;
+  string node_id = 2;
+  string path = 3;
+  google.protobuf.Timestamp last_verified = 4;
+}
+
+message ReplicateChunkRequest {
+  string chunk_id = 1;
+  string source_node_id = 2;
+  string target_node_id = 3;
+}
+
+// ============================================================================
+// Network Service Messages
+// ============================================================================
+
+// Service represents a network service
+message Service {
+  string id = 1;
+  string name = 2;
+  string namespace = 3;
+  ServiceSpec spec = 4;
+  ServiceStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  map<string, string> labels = 7;
+}
+
+message ServiceSpec {
+  string type = 1;  // ClusterIP, LoadBalancer, NodePort
+  repeated ServicePort ports = 2;
+  map<string, string> selector = 3;  // Label selector for endpoints
+  string session_affinity = 4;  // None, ClientIP
+  string load_balancer_policy = 5;  // RoundRobin, LeastConn, Weighted
+}
+
+message ServicePort {
+  string name = 1;
+  int32 port = 2;
+  int32 target_port = 3;
+  string protocol = 4;  // TCP, UDP
+}
+
+message ServiceStatus {
+  string cluster_ip = 1;
+  repeated string external_ips = 2;
+  int32 ready_endpoints = 3;
+  int32 total_endpoints = 4;
+}
+
+// Endpoint represents a service endpoint (backend)
+message Endpoint {
+  string id = 1;
+  string service_id = 2;
+  string address = 3;
+  int32 port = 4;
+  string node_id = 5;
+  string workload_id = 6;
+  EndpointHealth health = 7;
+  int32 weight = 8;
+  string zone = 9;
+  google.protobuf.Timestamp registered_at = 10;
+}
+
+message EndpointHealth {
+  string status = 1;  // Healthy, Unhealthy, Unknown
+  int32 consecutive_successes = 2;
+  int32 consecutive_failures = 3;
+  google.protobuf.Timestamp last_check = 4;
+  string reason = 5;
+}
+
+// Load balancer configuration
+message LoadBalancerConfig {
+  string service_id = 1;
+  string algorithm = 2;  // RoundRobin, LeastConn, Weighted, Locality
+  HealthCheckConfig health_check = 3;
+  int32 max_connections = 4;
+  google.protobuf.Duration timeout = 5;
+  bool locality_aware = 6;
+}
+
+message HealthCheckConfig {
+  enum Type {
+    TCP = 0;
+    HTTP = 1;
+    GRPC = 2;
+  }
+
+  Type type = 1;
+  string path = 2;
+  google.protobuf.Duration interval = 3;
+  google.protobuf.Duration timeout = 4;
+  int32 healthy_threshold = 5;
+  int32 unhealthy_threshold = 6;
+}
+
+// Network requests
+message CreateServiceRequest {
+  Service service = 1;
+}
+
+message GetServiceRequest {
+  string service_id = 1;
+}
+
+message ListServicesRequest {
+  string namespace = 1;
+  map<string, string> label_selector = 2;
+  int32 limit = 3;
+  string continue_token = 4;
+}
+
+message ListServicesResponse {
+  repeated Service services = 1;
+  string next_token = 2;
+}
+
+message DeleteServiceRequest {
+  string service_id = 1;
+}
+
+message UpdateServiceRequest {
+  Service service = 1;
+  repeated string update_mask = 2;
+}
+
+message RegisterEndpointRequest {
+  Endpoint endpoint = 1;
+}
+
+message DeregisterEndpointRequest {
+  string endpoint_id = 1;
+}
+
+message ListEndpointsRequest {
+  string service_id = 1;
+  string zone = 2;
+  string health_status = 3;
+}
+
+message ListEndpointsResponse {
+  repeated Endpoint endpoints = 1;
+}
+
+message UpdateEndpointHealthRequest {
+  string endpoint_id = 1;
+  EndpointHealth health = 2;
+}
+
+message GetLoadBalancerConfigRequest {
+  string service_id = 1;
+}
+
+message UpdateLoadBalancerConfigRequest {
+  LoadBalancerConfig config = 1;
+}
+
+message ResolveServiceRequest {
+  string service_name = 1;
+  string namespace = 2;
+  string caller_zone = 3;  // For locality-aware routing
+}
+
+message ResolveServiceResponse {
+  repeated Endpoint endpoints = 1;
+  string virtual_ip = 2;
+}
+
+message WatchServiceEndpointsRequest {
+  string service_id = 1;
+}
+
+message ServiceEndpointEvent {
+  enum EventType {
+    ADDED = 0;
+    MODIFIED = 1;
+    DELETED = 2;
+  }
+
+  EventType type = 1;
+  Endpoint endpoint = 2;
 }

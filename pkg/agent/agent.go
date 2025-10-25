@@ -3,15 +3,18 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/cloudless/cloudless/pkg/overlay"
 	"github.com/cloudless/cloudless/pkg/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -37,6 +40,12 @@ type Config struct {
 
 	// TLS certificate for overlay
 	TLSCert *tls.Certificate
+
+	// TLS configuration for coordinator connection
+	CertificateFile string // Path to client certificate
+	KeyFile         string // Path to client key
+	CAFile          string // Path to CA certificate
+	InsecureSkipVerify bool // Skip TLS verification (dev only!)
 }
 
 // Validate validates the agent configuration
@@ -74,6 +83,9 @@ func (c *Config) Validate() error {
 
 // Agent manages the node agent
 type Agent struct {
+	// Embed UnimplementedAgentServiceServer for forward compatibility
+	api.UnimplementedAgentServiceServer
+
 	config *Config
 	logger *zap.Logger
 
@@ -346,8 +358,8 @@ func (a *Agent) Stop(ctx context.Context) error {
 
 // RegisterServices registers gRPC services
 func (a *Agent) RegisterServices(server *grpc.Server) {
-	// TODO: Register AgentService
-	// api.RegisterAgentServiceServer(server, a)
+	api.RegisterAgentServiceServer(server, a)
+	a.logger.Info("Registered AgentService gRPC handlers")
 }
 
 // connectToCoordinator establishes connection to the coordinator
@@ -357,9 +369,46 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 	// Set up gRPC connection options
 	var opts []grpc.DialOption
 
-	// TODO: Add proper TLS credentials
-	// For now, use insecure connection
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Configure TLS
+	if a.config.CertificateFile != "" && a.config.KeyFile != "" && a.config.CAFile != "" {
+		// Load client certificate
+		cert, err := tls.LoadX509KeyPair(a.config.CertificateFile, a.config.KeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to load client certificate: %w", err)
+		}
+
+		// Load CA certificate
+		caCert, err := os.ReadFile(a.config.CAFile)
+		if err != nil {
+			return fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to add CA certificate to pool")
+		}
+
+		// Create TLS config
+		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			RootCAs:            certPool,
+			InsecureSkipVerify: a.config.InsecureSkipVerify,
+			MinVersion:         tls.VersionTLS13,
+		}
+
+		// Use TLS credentials
+		creds := credentials.NewTLS(tlsConfig)
+		opts = append(opts, creds)
+
+		a.logger.Info("Using mTLS for coordinator connection",
+			zap.String("cert", a.config.CertificateFile),
+			zap.String("ca", a.config.CAFile),
+		)
+	} else {
+		// Use insecure connection (development only!)
+		a.logger.Warn("Using insecure connection to coordinator (NOT SUITABLE FOR PRODUCTION)")
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
 
 	// Create connection
 	conn, err := grpc.DialContext(ctx, a.config.CoordinatorAddr, opts...)
@@ -369,9 +418,98 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 
 	a.coordinatorConn = conn
 
-	// TODO: Create coordinator client and perform enrollment
-	// For now, just verify connection works
-	a.logger.Info("Connected to coordinator")
+	// Create coordinator client
+	// Note: Once protobuf is generated, replace with:
+	// a.coordinatorClient = api.NewCoordinatorServiceClient(conn)
+
+	// Perform enrollment if we have a join token
+	if a.config.JoinToken != "" {
+		a.logger.Info("Starting node enrollment",
+			zap.String("node_id", a.config.NodeID),
+			zap.String("node_name", a.config.NodeName),
+		)
+
+		if err := a.performEnrollment(ctx); err != nil {
+			return fmt.Errorf("enrollment failed: %w", err)
+		}
+
+		a.logger.Info("Node enrollment completed successfully")
+	} else {
+		a.logger.Info("Connected to coordinator (skipping enrollment - no join token)")
+	}
+
+	return nil
+}
+
+// performEnrollment performs the node enrollment process
+func (a *Agent) performEnrollment(ctx context.Context) error {
+	// Prepare enrollment request
+	enrollReq := &api.EnrollNodeRequest{
+		NodeID:   a.config.NodeID,
+		NodeName: a.config.NodeName,
+		Address:  a.config.AgentAddr,
+		Region:   a.config.Region,
+		Zone:     a.config.Zone,
+		JoinToken: a.config.JoinToken,
+		Capabilities: api.NodeCapabilities{
+			GPUCount:        a.config.Resources.GPU,
+			AcceleratorType: "", // TODO: Detect from hardware
+			NetworkFeatures: []string{"quic", "udp", "tcp"},
+			StorageTypes:    []string{"local", "ephemeral"},
+		},
+		Resources: api.NodeResources{
+			CPUMillicores: a.config.Resources.CPUMillicores,
+			MemoryBytes:   a.config.Resources.MemoryBytes,
+			StorageBytes:  a.config.Resources.StorageBytes,
+			BandwidthBPS:  a.config.Resources.BandwidthBps,
+			GPUCount:      a.config.Resources.GPU,
+		},
+	}
+
+	a.logger.Info("Sending enrollment request",
+		zap.String("node_id", enrollReq.NodeID),
+		zap.String("region", enrollReq.Region),
+		zap.String("zone", enrollReq.Zone),
+		zap.Int64("cpu_millicores", enrollReq.Resources.CPUMillicores),
+		zap.Int64("memory_bytes", enrollReq.Resources.MemoryBytes),
+	)
+
+	// TODO: Once protobuf is generated, call:
+	// resp, err := a.coordinatorClient.EnrollNode(ctx, enrollReq)
+	// if err != nil {
+	//     return fmt.Errorf("enrollment RPC failed: %w", err)
+	// }
+
+	// For now, just log that we would send the request
+	a.logger.Info("Enrollment request prepared (waiting for protobuf generation to send actual RPC)",
+		zap.Any("request", enrollReq),
+	)
+
+	// TODO: Store received certificate
+	// if len(resp.Certificate) > 0 {
+	//     certPath := filepath.Join(a.config.DataDir, "certs", "node.crt")
+	//     if err := os.WriteFile(certPath, resp.Certificate, 0600); err != nil {
+	//         return fmt.Errorf("failed to save certificate: %w", err)
+	//     }
+	//     a.logger.Info("Node certificate saved", zap.String("path", certPath))
+	// }
+
+	// TODO: Store CA certificate
+	// if len(resp.CaCertificate) > 0 {
+	//     caPath := filepath.Join(a.config.DataDir, "certs", "ca.crt")
+	//     if err := os.WriteFile(caPath, resp.CaCertificate, 0600); err != nil {
+	//         return fmt.Errorf("failed to save CA certificate: %w", err)
+	//     }
+	//     a.logger.Info("CA certificate saved", zap.String("path", caPath))
+	// }
+
+	// TODO: Update heartbeat interval from response
+	// if resp.HeartbeatInterval != nil {
+	//     a.config.HeartbeatInterval = resp.HeartbeatInterval.AsDuration()
+	//     a.logger.Info("Updated heartbeat interval",
+	//         zap.Duration("interval", a.config.HeartbeatInterval),
+	//     )
+	// }
 
 	return nil
 }
@@ -411,6 +549,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 	)
 
 	// Collect container status
+	containerInfos := []api.ContainerInfo{}
 	containers, err := a.runtime.ListContainers(ctx)
 	if err != nil {
 		a.logger.Warn("Failed to list containers", zap.Error(err))
@@ -418,12 +557,166 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 		a.logger.Debug("Container status",
 			zap.Int("container_count", len(containers)),
 		)
+
+		// Convert to API container info
+		for _, container := range containers {
+			containerInfos = append(containerInfos, api.ContainerInfo{
+				ID:    container.ID,
+				Name:  container.Name,
+				State: container.State,
+				Image: container.Image,
+			})
+		}
 	}
 
-	// TODO: Send heartbeat to coordinator via gRPC
-	// TODO: Process response (new assignments, etc.)
+	// Collect node conditions
+	conditions := a.computeNodeConditions(snapshot)
+
+	// Prepare heartbeat request
+	heartbeatReq := &api.HeartbeatRequest{
+		NodeID: a.config.NodeID,
+		Capacity: api.NodeResources{
+			CPUMillicores: capacity.CPUMillicores,
+			MemoryBytes:   capacity.MemoryBytes,
+			StorageBytes:  capacity.StorageBytes,
+			BandwidthBPS:  capacity.BandwidthBps,
+			GPUCount:      capacity.GPU,
+		},
+		Usage: api.NodeResources{
+			CPUMillicores: usage.CPUMillicores,
+			MemoryBytes:   usage.MemoryBytes,
+			StorageBytes:  usage.StorageBytes,
+			BandwidthBPS:  usage.BandwidthBps,
+			GPUCount:      usage.GPU,
+		},
+		Containers: containerInfos,
+		Conditions: conditions,
+	}
+
+	// TODO: Once protobuf is generated, call:
+	// resp, err := a.coordinatorClient.Heartbeat(ctx, heartbeatReq)
+	// if err != nil {
+	//     return fmt.Errorf("heartbeat RPC failed: %w", err)
+	// }
+	//
+	// return a.processHeartbeatResponse(ctx, resp)
+
+	// For now, just log that we would send the request
+	a.logger.Debug("Heartbeat prepared (waiting for protobuf generation)",
+		zap.Int("container_count", len(containerInfos)),
+		zap.Int("condition_count", len(conditions)),
+	)
 
 	return nil
+}
+
+// computeNodeConditions computes node health conditions
+func (a *Agent) computeNodeConditions(snapshot ResourceSnapshot) []api.NodeCondition {
+	conditions := []api.NodeCondition{}
+
+	// Ready condition
+	ready := api.NodeCondition{
+		Type:   "Ready",
+		Status: "True",
+	}
+	conditions = append(conditions, ready)
+
+	// Memory pressure
+	if snapshot.MemoryUsedPercent > 85.0 {
+		conditions = append(conditions, api.NodeCondition{
+			Type:    "MemoryPressure",
+			Status:  "True",
+			Message: fmt.Sprintf("Memory usage at %.1f%%", snapshot.MemoryUsedPercent),
+		})
+	}
+
+	// Disk pressure
+	if snapshot.DiskUsedPercent > 85.0 {
+		conditions = append(conditions, api.NodeCondition{
+			Type:    "DiskPressure",
+			Status:  "True",
+			Message: fmt.Sprintf("Disk usage at %.1f%%", snapshot.DiskUsedPercent),
+		})
+	}
+
+	// Network availability (always available for now)
+	conditions = append(conditions, api.NodeCondition{
+		Type:   "NetworkAvailable",
+		Status: "True",
+	})
+
+	return conditions
+}
+
+// processHeartbeatResponse processes the heartbeat response from coordinator
+func (a *Agent) processHeartbeatResponse(ctx context.Context, resp *api.HeartbeatResponse) error {
+	a.logger.Debug("Processing heartbeat response",
+		zap.Int("assignments", len(resp.Assignments)),
+		zap.Int("commands", len(resp.Commands)),
+	)
+
+	// Process workload assignments
+	for _, assignment := range resp.Assignments {
+		a.logger.Info("Received workload assignment",
+			zap.String("workload_id", assignment.WorkloadID),
+			zap.String("image", assignment.Image),
+		)
+
+		// TODO: Start workload container
+		// This would involve:
+		// 1. Pull image if needed
+		// 2. Create container with resource constraints
+		// 3. Start container
+		// 4. Report success/failure back
+		go a.handleWorkloadAssignment(ctx, assignment)
+	}
+
+	// Process commands
+	for _, command := range resp.Commands {
+		a.logger.Info("Received command", zap.String("command", command))
+
+		// TODO: Execute command
+		// Commands might include:
+		// - "stop:{containerID}" - Stop a container
+		// - "update:{workloadID}" - Update a workload
+		// - "drain" - Prepare for maintenance
+		go a.handleCommand(ctx, command)
+	}
+
+	return nil
+}
+
+// handleWorkloadAssignment handles a workload assignment
+func (a *Agent) handleWorkloadAssignment(ctx context.Context, assignment *api.WorkloadAssignment) {
+	a.logger.Info("Handling workload assignment",
+		zap.String("workload_id", assignment.WorkloadID),
+		zap.String("image", assignment.Image),
+	)
+
+	// TODO: Implement workload lifecycle:
+	// 1. Pull image
+	// 2. Create container with resource limits from assignment.Resources
+	// 3. Configure networking
+	// 4. Start container
+	// 5. Monitor health
+
+	// For now, just log the intent
+	a.logger.Info("Workload assignment handling not yet implemented (waiting for container runtime integration)")
+}
+
+// handleCommand handles a command from the coordinator
+func (a *Agent) handleCommand(ctx context.Context, command string) {
+	a.logger.Info("Handling command", zap.String("command", command))
+
+	// TODO: Parse and execute commands
+	// Format: "action:parameter"
+	// Examples:
+	// - "stop:container-123"
+	// - "drain:graceful"
+	// - "update:workload-456"
+
+	// For now, just log the intent
+	a.logger.Info("Command handling not yet implemented")
 }
 
 // GetRuntime returns the container runtime

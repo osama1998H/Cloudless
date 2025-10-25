@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/cloudless/cloudless/pkg/coordinator/membership"
 	"github.com/cloudless/cloudless/pkg/mtls"
 	"github.com/cloudless/cloudless/pkg/overlay"
@@ -36,6 +37,11 @@ type Config struct {
 
 	// Overlay networking
 	OverlayConfig overlay.OverlayConfig
+
+	// Security configuration
+	TokenSecret      []byte        // Secret for signing enrollment tokens
+	TokenExpiry      time.Duration // Token expiry duration
+	CertificatesPath string        // Path to TLS certificates
 }
 
 // Validate validates the coordinator configuration
@@ -64,11 +70,31 @@ func (c *Config) Validate() error {
 	if c.HeartbeatTimeout == 0 {
 		c.HeartbeatTimeout = 30 * time.Second
 	}
+	// Security defaults
+	if len(c.TokenSecret) == 0 {
+		// Try to load from environment variable
+		if secret := os.Getenv("CLOUDLESS_TOKEN_SECRET"); secret != "" {
+			c.TokenSecret = []byte(secret)
+		} else {
+			// Generate a random secret if none provided (development only!)
+			c.Logger.Warn("No token secret configured - generating random secret (NOT SUITABLE FOR PRODUCTION)")
+			c.TokenSecret = []byte(fmt.Sprintf("dev-secret-%d", time.Now().UnixNano()))
+		}
+	}
+	if c.TokenExpiry == 0 {
+		c.TokenExpiry = 24 * time.Hour
+	}
+	if c.CertificatesPath == "" {
+		c.CertificatesPath = filepath.Join(c.DataDir, "certs")
+	}
 	return nil
 }
 
 // Coordinator manages the control plane
 type Coordinator struct {
+	// Embed UnimplementedCoordinatorServiceServer for forward compatibility
+	api.UnimplementedCoordinatorServiceServer
+
 	config *Config
 	logger *zap.Logger
 
@@ -76,7 +102,7 @@ type Coordinator struct {
 	raftStore      *raft.Store
 	membershipMgr  *membership.Manager
 	scheduler      *scheduler.Scheduler
-	ca             *mtls.CertificateAuthority
+	ca             *mtls.CA
 	tokenManager   *mtls.TokenManager
 
 	// Overlay networking components
@@ -120,12 +146,12 @@ func New(config *Config) (*Coordinator, error) {
 	// Initialize Certificate Authority
 	config.Logger.Info("Initializing Certificate Authority")
 	caConfig := mtls.CAConfig{
+		DataDir:      caDir,
 		Organization: "Cloudless",
-		ValidityDays: 3650, // 10 years
-		KeySize:      4096,
-		CADir:        caDir,
+		Country:      "US",
+		Logger:       config.Logger,
 	}
-	ca, err := mtls.NewCertificateAuthority(caConfig, config.Logger)
+	ca, err := mtls.NewCA(caConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize CA: %w", err)
 	}
@@ -133,11 +159,14 @@ func New(config *Config) (*Coordinator, error) {
 
 	// Initialize Token Manager
 	config.Logger.Info("Initializing Token Manager")
-	tokenConfig := mtls.TokenConfig{
-		TokenExpiry: 24 * time.Hour,
-		Secret:      []byte("change-this-secret-in-production"), // TODO: Make configurable
+	tokenManagerConfig := mtls.TokenManagerConfig{
+		SigningKey: config.TokenSecret,
+		Logger:     config.Logger,
 	}
-	tokenManager := mtls.NewTokenManager(tokenConfig, config.Logger)
+	tokenManager, err := mtls.NewTokenManager(tokenManagerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize token manager: %w", err)
+	}
 	c.tokenManager = tokenManager
 
 	// Initialize Membership Manager
@@ -381,8 +410,8 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 
 // RegisterServices registers gRPC services
 func (c *Coordinator) RegisterServices(server *grpc.Server) {
-	// TODO: Register CoordinatorService
-	// api.RegisterCoordinatorServiceServer(server, c)
+	api.RegisterCoordinatorServiceServer(server, c)
+	c.logger.Info("Registered CoordinatorService gRPC handlers")
 }
 
 // GetMembershipManager returns the membership manager
@@ -396,7 +425,7 @@ func (c *Coordinator) GetScheduler() *scheduler.Scheduler {
 }
 
 // GetCA returns the certificate authority
-func (c *Coordinator) GetCA() *mtls.CertificateAuthority {
+func (c *Coordinator) GetCA() *mtls.CA {
 	return c.ca
 }
 
@@ -430,7 +459,7 @@ func (c *Coordinator) JoinCluster(nodeID, addr string) error {
 }
 
 // ScheduleWorkload schedules a workload across the cluster
-func (c *Coordinator) ScheduleWorkload(ctx context.Context, spec scheduler.WorkloadSpec) ([]scheduler.PlacementDecision, error) {
+func (c *Coordinator) ScheduleWorkload(ctx context.Context, spec scheduler.WorkloadSpec) ([]scheduler.ScheduleDecision, error) {
 	if !c.IsLeader() {
 		return nil, fmt.Errorf("not the leader, redirect to: %s", c.GetLeader())
 	}

@@ -93,7 +93,8 @@ func (f *FSM) applyBatch(batch *BatchCommand) interface{} {
 	applied := 0
 
 	for _, cmd := range batch.Commands {
-		if err := f.applyCommand(cmd); err != nil {
+		result := f.applyCommand(cmd)
+		if err, ok := result.(error); ok && err != nil {
 			lastErr = err
 			f.logger.Error("Failed to apply command in batch",
 				zap.Error(err),
@@ -426,24 +427,43 @@ func (h *hashiLogger) Trace(msg string, args ...interface{}) {
 	h.logger.Debug(fmt.Sprintf(msg, args...))
 }
 
-func (h *hashiLogger) GetLevel() string {
-	if h.IsDebug() {
-		return "DEBUG"
+func (h *hashiLogger) Log(level hclog.Level, msg string, args ...interface{}) {
+	switch level {
+	case hclog.Trace, hclog.Debug:
+		h.Debug(msg, args...)
+	case hclog.Info:
+		h.Info(msg, args...)
+	case hclog.Warn:
+		h.Warn(msg, args...)
+	case hclog.Error:
+		h.Error(msg, args...)
+	default:
+		h.Info(msg, args...)
 	}
-	if h.IsInfo() {
-		return "INFO"
-	}
-	if h.IsWarn() {
-		return "WARN"
-	}
-	if h.IsError() {
-		return "ERROR"
-	}
-	return "UNKNOWN"
 }
 
-func (h *hashiLogger) SetLevel(level string) {
+func (h *hashiLogger) GetLevel() hclog.Level {
+	if h.IsDebug() {
+		return hclog.Debug
+	}
+	if h.IsInfo() {
+		return hclog.Info
+	}
+	if h.IsWarn() {
+		return hclog.Warn
+	}
+	if h.IsError() {
+		return hclog.Error
+	}
+	return hclog.NoLevel
+}
+
+func (h *hashiLogger) SetLevel(level hclog.Level) {
 	// Not implemented - level is controlled by zap configuration
+}
+
+func (h *hashiLogger) Name() string {
+	return h.logger.Name()
 }
 
 func (h *hashiLogger) Named(name string) hclog.Logger {
