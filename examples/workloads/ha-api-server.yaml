@@ -1,0 +1,125 @@
+# High Availability API Server
+# Demonstrates zone spread, anti-affinity, and resource limits
+apiVersion: cloudless.io/v1
+kind: Workload
+metadata:
+  name: ha-api-server
+  namespace: production
+  labels:
+    app: api-server
+    tier: backend
+    criticality: high
+  annotations:
+    description: "Highly available API server with zone spread"
+spec:
+  # Container specification
+  image: myregistry/api-server:v2.1.0
+  command: ["/app/server"]
+  args: ["--port=8080", "--workers=4"]
+  replicas: 5
+
+  # Resource requirements - production grade
+  resources:
+    requests:
+      cpuMillicores: 500         # 0.5 CPU
+      memoryBytes: 1073741824    # 1 GiB
+      storageBytes: 5368709120   # 5 GiB
+      bandwidthBps: 104857600    # 100 Mbps
+    limits:
+      cpuMillicores: 2000        # 2 CPU
+      memoryBytes: 2147483648    # 2 GiB
+
+  # Placement policy for high availability
+  placement:
+    # Spread across zones for fault tolerance
+    spreadTopology: zone
+
+    # Prefer specific regions
+    regions:
+      - us-east
+      - us-west
+
+    # Node selector
+    nodeSelector:
+      environment: production
+      ssd: "true"
+
+    # Pod anti-affinity - don't place replicas on same node
+    antiAffinity:
+      - type: WORKLOAD
+        matchLabels:
+          app: api-server
+        topologyKey: kubernetes.io/hostname
+        required: true
+
+    # Tolerate specific taints
+    tolerations:
+      - key: dedicated
+        value: api
+        operator: Equal
+        effect: NoSchedule
+
+  # Ports
+  ports:
+    - name: api
+      containerPort: 8080
+      hostPort: 0  # Auto-assign
+      protocol: TCP
+    - name: metrics
+      containerPort: 9090
+      protocol: TCP
+
+  # Environment variables
+  env:
+    LOG_LEVEL: info
+    DATABASE_URL: postgres://db.prod:5432/api
+    CACHE_ENABLED: "true"
+    MAX_CONNECTIONS: "100"
+
+  # Volumes
+  volumes:
+    - name: config
+      source: configMap
+      mountPath: /etc/api
+      readOnly: true
+    - name: cache
+      source: emptyDir
+      mountPath: /var/cache/api
+      readOnly: false
+
+  # Health probes
+  livenessProbe:
+    http:
+      path: /healthz
+      port: 8080
+      headers:
+        - name: X-Health-Check
+          value: "true"
+    initialDelay: 15s
+    period: 20s
+    timeout: 5s
+    successThreshold: 1
+    failureThreshold: 3
+
+  readinessProbe:
+    http:
+      path: /ready
+      port: 8080
+    initialDelay: 10s
+    period: 10s
+    timeout: 3s
+    successThreshold: 1
+    failureThreshold: 2
+
+  # Restart policy
+  restartPolicy:
+    policy: ON_FAILURE
+    maxRetries: 3
+    backoff: 60s
+
+  # Rollout strategy - zero downtime
+  rollout:
+    strategy: ROLLING_UPDATE
+    maxSurge: 2           # Can have 2 extra replicas during rollout
+    maxUnavailable: 0     # Always keep all replicas available
+    pauseDuration: 30s    # Wait 30s between batches

@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  coordinator:
+    image: cloudless/coordinator:latest
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.coordinator
+    ports:
+      - "8443:8443"   # gRPC API
+      - "9090:9090"   # Metrics
+    environment:
+      - LOG_LEVEL=debug
+      - RAFT_BOOTSTRAP=true
+      - DATA_DIR=/var/lib/cloudless
+    volumes:
+      - coordinator-data:/var/lib/cloudless
+      - ../../config:/etc/cloudless/config:ro
+    networks:
+      - cloudless
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command:
+      - --config=/etc/cloudless/config/coordinator.yaml
+
+  agent1:
+    image: cloudless/agent:latest
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.agent
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - LOG_LEVEL=debug
+      - COORDINATOR_ADDRESS=coordinator:8443
+      - NODE_NAME=agent-1
+      - REGION=us-east
+      - ZONE=us-east-1a
+    volumes:
+      - agent1-data:/var/lib/cloudless
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cloudless
+    privileged: true
+    command:
+      - --coordinator=coordinator:8443
+      - --region=us-east
+      - --zone=us-east-1a
+
+  agent2:
+    image: cloudless/agent:latest
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.agent
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - LOG_LEVEL=debug
+      - COORDINATOR_ADDRESS=coordinator:8443
+      - NODE_NAME=agent-2
+      - REGION=us-east
+      - ZONE=us-east-1b
+    volumes:
+      - agent2-data:/var/lib/cloudless
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cloudless
+    privileged: true
+    command:
+      - --coordinator=coordinator:8443
+      - --region=us-east
+      - --zone=us-east-1b
+
+  agent3:
+    image: cloudless/agent:latest
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.agent
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - LOG_LEVEL=debug
+      - COORDINATOR_ADDRESS=coordinator:8443
+      - NODE_NAME=agent-3
+      - REGION=us-west
+      - ZONE=us-west-1a
+    volumes:
+      - agent3-data:/var/lib/cloudless
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cloudless
+    privileged: true
+    command:
+      - --coordinator=coordinator:8443
+      - --region=us-west
+      - --zone=us-west-1a
+
+  # Observability stack for testing
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - cloudless
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - cloudless
+    depends_on:
+      - prometheus
+
+volumes:
+  coordinator-data:
+  agent1-data:
+  agent2-data:
+  agent3-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  cloudless:
+    driver: bridge
