@@ -148,6 +148,14 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create coordinator: %w", err)
 	}
 
+	// Generate bootstrap tokens for development/testing (only if explicitly enabled)
+	// SECURITY WARNING: Only enable in development environments, never in production
+	if os.Getenv("CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS") == "1" {
+		if err := generateBootstrapTokens(coord, logger); err != nil {
+			logger.Warn("Failed to generate bootstrap tokens", zap.Error(err))
+		}
+	}
+
 	// Start metrics server
 	metricsServer := startMetricsServer(config.MetricsAddr, logger)
 
@@ -286,4 +294,51 @@ func startMetricsServer(addr string, logger *zap.Logger) *http.Server {
 	}()
 
 	return server
+}
+
+// generateBootstrapTokens generates bootstrap tokens for development/testing
+func generateBootstrapTokens(coord *coordinator.Coordinator, logger *zap.Logger) error {
+	tokenMgr := coord.GetTokenManager()
+	if tokenMgr == nil {
+		return fmt.Errorf("token manager not initialized")
+	}
+
+	// Define agents that need tokens
+	agents := []struct {
+		NodeID   string
+		NodeName string
+		Region   string
+		Zone     string
+	}{
+		{"agent-1", "agent-1", "local", "zone-a"},
+		{"agent-2", "agent-2", "local", "zone-b"},
+		{"agent-3", "agent-3", "local", "zone-a"},
+	}
+
+	// Generate tokens for each agent
+	for _, agent := range agents {
+		token, err := tokenMgr.GenerateToken(
+			agent.NodeID,
+			agent.NodeName,
+			agent.Region,
+			agent.Zone,
+			365*24*time.Hour, // 1 year validity
+			999, // max uses
+		)
+		if err != nil {
+			logger.Warn("Failed to generate bootstrap token",
+				zap.String("node_id", agent.NodeID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		logger.Info("Generated bootstrap token",
+			zap.String("node_id", agent.NodeID),
+			zap.String("node_name", agent.NodeName),
+			zap.String("token", token.Token),
+		)
+	}
+
+	return nil
 }

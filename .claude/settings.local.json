@@ -21,7 +21,13 @@
       "Bash(~/go/bin/grpcurl -plaintext localhost:8080 list)",
       "Bash(docker port:*)",
       "Bash(~/go/bin/grpcurl -plaintext -proto /Users/osamamuhammed/Cloudless/pkg/api/cloudless.proto localhost:8080 list)",
-      "Bash(docker-compose restart:*)"
+      "Bash(docker-compose restart:*)",
+      "Bash(docker buildx build:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose down)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose ps:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

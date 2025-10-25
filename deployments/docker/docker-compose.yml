@@ -29,6 +29,7 @@ services:
       - CLOUDLESS_METRICS_ADDR=0.0.0.0:9090
       - CLOUDLESS_DATA_DIR=/data
       - CLOUDLESS_BOOTSTRAP=true
+      - CLOUDLESS_TOKEN_SECRET=dev-secret-fixed-key-for-testing
     volumes:
       - coordinator-data:/data
       - ./config/coordinator.yaml:/etc/cloudless/coordinator.yaml:ro
@@ -63,7 +64,10 @@ services:
       - CLOUDLESS_MEMORY_MB=2048
       - CLOUDLESS_STORAGE_GB=10
       - CLOUDLESS_BANDWIDTH_MBPS=100
-      - CLOUDLESS_JOIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl9pZCI6ImQ0ODlhMzk0LTBlZmEtNGY3NC1iNmFmLTgzZDA3ZDEwMDFkNCIsIm1heF91c2VzIjo5OTksImlzcyI6ImNsb3VkbGVzcy1jb29yZGluYXRvciIsImV4cCI6MTc5Mjk0OTQ2MSwiaWF0IjoxNzYxNDEzNDYxLCJqdGkiOiJkNDg5YTM5NC0wZWZhLTRmNzQtYjZhZi04M2QwN2QxMDAxZDQifQ.x3sHELQM3sYt2gdXmx7HUgx0cGxarKzuJDbO060jW-A
+      # SECURITY WARNING: Use environment variables for tokens in production
+      # Generate fresh tokens via coordinator API, never commit tokens to source control
+      # For local development, set CLOUDLESS_JOIN_TOKEN_AGENT1 in a .env file
+      - CLOUDLESS_JOIN_TOKEN=${CLOUDLESS_JOIN_TOKEN_AGENT1:-}
       - CLOUDLESS_TLS_CERT=/etc/cloudless/certs/agent-1.crt
       - CLOUDLESS_TLS_KEY=/etc/cloudless/certs/agent-1.key
       - CLOUDLESS_TLS_CA=/etc/cloudless/certs/ca.crt
@@ -99,7 +103,10 @@ services:
       - CLOUDLESS_MEMORY_MB=4096
       - CLOUDLESS_STORAGE_GB=20
       - CLOUDLESS_BANDWIDTH_MBPS=200
-      - CLOUDLESS_JOIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl9pZCI6ImQ0ODlhMzk0LTBlZmEtNGY3NC1iNmFmLTgzZDA3ZDEwMDFkNCIsIm1heF91c2VzIjo5OTksImlzcyI6ImNsb3VkbGVzcy1jb29yZGluYXRvciIsImV4cCI6MTc5Mjk0OTQ2MSwiaWF0IjoxNzYxNDEzNDYxLCJqdGkiOiJkNDg5YTM5NC0wZWZhLTRmNzQtYjZhZi04M2QwN2QxMDAxZDQifQ.x3sHELQM3sYt2gdXmx7HUgx0cGxarKzuJDbO060jW-A
+      # SECURITY WARNING: Use environment variables for tokens in production
+      # Generate fresh tokens via coordinator API, never commit tokens to source control
+      # For local development, set CLOUDLESS_JOIN_TOKEN_AGENT2 in a .env file
+      - CLOUDLESS_JOIN_TOKEN=${CLOUDLESS_JOIN_TOKEN_AGENT2:-}
       - CLOUDLESS_TLS_CERT=/etc/cloudless/certs/agent-2.crt
       - CLOUDLESS_TLS_KEY=/etc/cloudless/certs/agent-2.key
       - CLOUDLESS_TLS_CA=/etc/cloudless/certs/ca.crt
@@ -136,7 +143,10 @@ services:
       - CLOUDLESS_STORAGE_GB=5
       - CLOUDLESS_BANDWIDTH_MBPS=50
       - CLOUDLESS_NODE_TYPE=edge  # Simulate edge device
-      - CLOUDLESS_JOIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl9pZCI6ImQ0ODlhMzk0LTBlZmEtNGY3NC1iNmFmLTgzZDA3ZDEwMDFkNCIsIm1heF91c2VzIjo5OTksImlzcyI6ImNsb3VkbGVzcy1jb29yZGluYXRvciIsImV4cCI6MTc5Mjk0OTQ2MSwiaWF0IjoxNzYxNDEzNDYxLCJqdGkiOiJkNDg5YTM5NC0wZWZhLTRmNzQtYjZhZi04M2QwN2QxMDAxZDQifQ.x3sHELQM3sYt2gdXmx7HUgx0cGxarKzuJDbO060jW-A
+      # SECURITY WARNING: Use environment variables for tokens in production
+      # Generate fresh tokens via coordinator API, never commit tokens to source control
+      # For local development, set CLOUDLESS_JOIN_TOKEN_AGENT3 in a .env file
+      - CLOUDLESS_JOIN_TOKEN=${CLOUDLESS_JOIN_TOKEN_AGENT3:-}
       - CLOUDLESS_TLS_CERT=/etc/cloudless/certs/agent-3.crt
       - CLOUDLESS_TLS_KEY=/etc/cloudless/certs/agent-3.key
       - CLOUDLESS_TLS_CA=/etc/cloudless/certs/ca.crt

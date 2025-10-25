@@ -151,3 +151,171 @@ Cloudless Platform Implementation Plan
 
      This plan follows your P0-P6 phases while prioritizing the components you selected. The implementation will be incremental, with 
      each phase building on the previous one to create a robust distributed compute platform.
+
+
+
+refactoring plan 
+  ⎿  Cloudless Refactoring Plan - PRD Alignment
+
+     After analyzing the codebase against Cloudless.MD requirements, I've identified 6 major refactoring opportunities that will bring the 
+     implementation into full alignment with the Product Requirements Document.
+
+     ---
+     1. Policy Engine Implementation [HIGH PRIORITY]
+
+     Status: pkg/policy/ exists but is EMPTYPRD Reference: CLD-REQ-061, Section 12
+
+     Gap: The PRD requires an OPA-style policy engine embedded in the Coordinator to enforce:
+     - Image registry allow/deny lists
+     - Container capabilities restrictions
+     - Egress destination filtering
+     - Custom security policies
+
+     Refactoring Tasks:
+     - Create pkg/policy/engine.go - Core policy evaluation engine
+     - Create pkg/policy/rules.go - Rule definition and parsing
+     - Create pkg/policy/evaluator.go - Policy evaluation against workload specs
+     - Integrate with coordinator's workload admission pipeline
+     - Add policy violation events to event stream
+
+     Files to Create/Modify:
+     - pkg/policy/*.go (new package implementation)
+     - pkg/coordinator/coordinator.go (integrate policy checks)
+     - pkg/observability/events.go (EventPolicyViolation already defined ✓)
+
+     ---
+     2. Secrets Management System [HIGH PRIORITY]
+
+     Status: NOT IMPLEMENTEDPRD Reference: CLD-REQ-063, Section 12
+
+     Gap: No secrets management found in codebase. PRD requires:
+     - Envelope encryption for secrets at rest
+     - Delivery over mTLS with audience and TTL constraints
+     - Short-lived token mechanism
+
+     Refactoring Tasks:
+     - Create pkg/secrets/ package
+     - Implement envelope encryption (data key + master key pattern)
+     - Add secrets storage in RAFT store
+     - Create gRPC API for secrets (CreateSecret, GetSecret, RotateSecret)
+     - Integrate with agent for secure secret delivery to workloads
+
+     Files to Create:
+     - pkg/secrets/manager.go - Secret lifecycle management
+     - pkg/secrets/encryption.go - Envelope encryption
+     - pkg/secrets/store.go - RAFT-backed persistence
+     - pkg/api/cloudless.proto - Add SecretsService RPCs
+     - pkg/coordinator/secrets_handler.go - gRPC handlers
+
+     ---
+     3. Health Probes Runtime Implementation [MEDIUM PRIORITY]
+
+     Status: Defined in proto, NOT implemented in runtimePRD Reference: CLD-REQ-032
+
+     Gap: Health probes (liveness/readiness) are defined in proto/examples but not executed by the runtime. PRD requires probes to drive:
+     - Automated container restart (liveness)
+     - Traffic gating (readiness)
+     - Replica rescheduling on persistent failures
+
+     Refactoring Tasks:
+     - Create pkg/runtime/health.go - Health check executor (HTTP, TCP, Exec)
+     - Add probe configuration to container spec
+     - Implement periodic probe execution in agent
+     - Report probe results in heartbeat to coordinator
+     - Trigger replica rescheduling on failed liveness probes
+
+     Files to Create/Modify:
+     - pkg/runtime/health.go (new)
+     - pkg/agent/agent.go (integrate probe executor)
+     - pkg/coordinator/membership/health_monitor.go (react to probe failures)
+
+     ---
+     4. MinAvailable Constraint Enforcement [MEDIUM PRIORITY]
+
+     Status: NOT IMPLEMENTEDPRD Reference: CLD-REQ-023, CLD-REQ-030
+
+     Gap: Rolling updates and failure handling don't respect minAvailable replicas. PRD requires:
+     - Rollouts keep ≥ minAvailable replicas serving during updates
+     - Failed nodes don't reduce service below minAvailable
+     - Admission control rejects scale-down that violates minAvailable
+
+     Refactoring Tasks:
+     - Add MinAvailable field to RolloutStrategy struct
+     - Implement rollout orchestrator that respects minAvailable during updates
+     - Add minAvailable check to scale operations
+     - Enhance replica rescheduling to maintain minAvailable during node failures
+
+     Files to Modify:
+     - pkg/scheduler/scheduler.go - Add RolloutStrategy.MinAvailable field
+     - pkg/coordinator/state_manager.go - Add minAvailable validation
+     - pkg/coordinator/grpc_handlers.go - Implement rollout orchestration
+     - pkg/api/cloudless.proto - Add min_available to RolloutStrategy message
+
+     ---
+     5. Scheduler Scoring Function Alignment [LOW PRIORITY]
+
+     Status: Partially aligned, needs refinementPRD Reference: CLD-REQ-021
+
+     Gap: PRD specifies scoring function with negative network penalty:
+     S = w_l*locality + w_r*reliability + w_c*cost + w_u*utilization_balance − w_n*network_penalty
+
+     Current implementation treats all weights as positive. Also naming inconsistency: NetworkWeight vs NetworkPenaltyWeight.
+
+     Refactoring Tasks:
+     - Rename NetworkWeight → NetworkPenaltyWeight in ScorerConfig
+     - Implement network penalty as subtraction (negative contribution to score)
+     - Update default weights to match PRD recommendations
+     - Add scoring formula documentation in scorer.go
+
+     Files to Modify:
+     - pkg/scheduler/scorer.go - Implement negative penalty, rename field
+     - pkg/scheduler/scorer_test.go - Update tests for negative penalty
+     - pkg/coordinator/coordinator.go - Update default config
+
+     ---
+     6. Storage Erasure Coding Support [LOW PRIORITY - Post-MVP]
+
+     Status: NOT IMPLEMENTEDPRD Reference: CLD-REQ-053
+
+     Gap: PRD allows optional erasure coding for cold data when node count ≥ 6. Currently only replication is implemented.
+
+     Refactoring Tasks:
+     - Create pkg/storage/erasure.go - Reed-Solomon erasure coding
+     - Add EC configuration to StorageConfig (k data + m parity shards)
+     - Implement EC encoding/decoding for cold storage class
+     - Add node count check (≥ 6) before enabling EC
+     - Maintain backward compatibility with replication-only mode
+
+     Files to Create/Modify:
+     - pkg/storage/erasure.go (new - Reed-Solomon implementation)
+     - pkg/storage/types.go - Add EC config fields
+     - pkg/storage/placement.go - Integrate EC into placement decisions
+     - pkg/storage/repair.go - Add EC repair logic
+
+     ---
+     Summary
+
+     High Priority (MVP Gaps):
+     1. Policy Engine - Empty package, core security requirement
+     2. Secrets Management - Completely missing
+
+     Medium Priority (Functional Gaps):
+     3. Health Probes - Defined but not executed
+     4. MinAvailable Constraint - Critical for HA rollouts
+
+     Low Priority (Optimizations):
+     5. Scoring Function - Minor alignment issue
+     6. Erasure Coding - Post-MVP feature
+
+     Recommendation: Start with items #1-4 as they represent core PRD requirements (CLD-REQ-*) that are missing or incomplete.
+
+
+     The image pull error is expected - agents are using a dummy container runtime in this test environment. The important part is that scheduling
+  works correctly
+
+
+    Note on Issue #8 (RAFT Initialization Order)
+
+  This issue has a structural dependency conflict: The Membership Manager constructor requires a Store interface (line 158-160 validation in
+  membership/manager.go), which is satisfied by RAFT Store. Moving RAFT initialization after Membership Manager would require architectural changes to use
+  dependency injection or a two-phase initialization pattern. This should be addressed in a separate architectural refactoring PR.

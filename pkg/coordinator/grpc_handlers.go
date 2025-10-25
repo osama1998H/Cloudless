@@ -376,6 +376,16 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		UpdatedAt:       time.Now(),
 	}
 
+	// Policy-based admission control
+	if err := c.AdmitWorkload(ctx, workload); err != nil {
+		c.logger.Warn("Workload admission denied",
+			zap.String("workload", workload.Name),
+			zap.String("namespace", workload.Namespace),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
 	// Save workload state to RAFT
 	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
 		c.logger.Error("Failed to save workload state",
@@ -557,6 +567,16 @@ func (c *Coordinator) UpdateWorkload(ctx context.Context, req *api.UpdateWorkloa
 	}
 	if len(workload.Annotations) > 0 {
 		existingState.Annotations = workload.Annotations
+	}
+
+	// Policy-based admission control for updated workload
+	// Re-validate the workload spec to prevent policy circumvention
+	if err := c.AdmitWorkload(ctx, workload); err != nil {
+		c.logger.Warn("Workload update admission denied",
+			zap.String("workload_id", workloadID),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("policy admission failed: %w", err)
 	}
 
 	// Save updated workload state
