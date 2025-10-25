@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(go mod init:*)",
-      "Bash(go build:*)"
+      "Bash(go build:*)",
+      "Bash(make docker:*)",
+      "Bash(make proto:*)",
+      "Bash(go install:*)"
     ],
     "deny": [],
     "ask": []

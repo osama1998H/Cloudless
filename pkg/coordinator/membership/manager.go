@@ -341,7 +341,6 @@ func (m *Manager) EnrollNode(ctx context.Context, req *api.EnrollNodeRequest) (*
 	response := &api.EnrollNodeResponse{
 		NodeId:            nodeID,
 		Certificate:       cert.CertPEM,
-		PrivateKey:        cert.KeyPEM,
 		CaCertificate:     caCertPEM,
 		HeartbeatInterval: heartbeatDuration,
 	}
@@ -396,7 +395,7 @@ func (m *Manager) ProcessHeartbeat(ctx context.Context, req *api.HeartbeatReques
 			fragmentInfo := FragmentInfo{
 				ID:         frag.Id,
 				WorkloadID: frag.WorkloadId,
-				State:      frag.State.String(),
+				State:      frag.GetStatus().GetState().String(),
 			}
 
 			// Map resources if available

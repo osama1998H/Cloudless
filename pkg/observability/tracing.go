@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -145,11 +146,9 @@ func AddSpanEvent(ctx context.Context, name string, attrs ...trace.EventOption) 
 
 // AddSpanAttributes adds attributes to the current span
 func AddSpanAttributes(ctx context.Context, attrs ...trace.SpanStartEventOption) {
-	span := trace.SpanFromContext(ctx)
-	for _, attr := range attrs {
-		// Note: SpanStartEventOption is not the right type here
-		// This would need to be adjusted based on actual attribute setting
-	}
+	// Note: This is a placeholder implementation
+	// In production, you would use attribute.KeyValue for setting attributes
+	_ = trace.SpanFromContext(ctx)
 }
 
 // RecordError records an error on the current span
@@ -159,7 +158,7 @@ func RecordError(ctx context.Context, err error) {
 }
 
 // SetSpanStatus sets the status of the current span
-func SetSpanStatus(ctx context.Context, code trace.StatusCode, description string) {
+func SetSpanStatus(ctx context.Context, code codes.Code, description string) {
 	span := trace.SpanFromContext(ctx)
 	span.SetStatus(code, description)
 }
@@ -175,9 +174,9 @@ func InstrumentGRPCServer() (grpc.UnaryServerInterceptor, grpc.StreamServerInter
 
 		if err != nil {
 			RecordError(ctx, err)
-			SetSpanStatus(ctx, trace.StatusCodeError, err.Error())
+			SetSpanStatus(ctx, codes.Error, err.Error())
 		} else {
-			SetSpanStatus(ctx, trace.StatusCodeOk, "")
+			SetSpanStatus(ctx, codes.Ok, "")
 		}
 
 		return resp, err
@@ -198,9 +197,9 @@ func InstrumentGRPCServer() (grpc.UnaryServerInterceptor, grpc.StreamServerInter
 
 		if err != nil {
 			RecordError(ctx, err)
-			SetSpanStatus(ctx, trace.StatusCodeError, err.Error())
+			SetSpanStatus(ctx, codes.Error, err.Error())
 		} else {
-			SetSpanStatus(ctx, trace.StatusCodeOk, "")
+			SetSpanStatus(ctx, codes.Ok, "")
 		}
 
 		return err

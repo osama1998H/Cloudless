@@ -414,7 +414,7 @@ message EnrollNodeResponse {
 message HeartbeatRequest {
   string node_id = 1;
   ResourceUsage usage = 2;
-  repeated FragmentStatus fragments = 3;
+  repeated Fragment fragments = 3;
   repeated ContainerStatus containers = 4;
 }
 

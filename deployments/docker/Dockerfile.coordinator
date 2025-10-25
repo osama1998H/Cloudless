@@ -1,0 +1,64 @@
+# Multi-stage build for Cloudless Coordinator
+
+# Build stage
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make ca-certificates
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the coordinator binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w" \
+    -o coordinator \
+    ./cmd/coordinator
+
+# Runtime stage
+FROM alpine:3.18
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    && addgroup -g 1000 cloudless \
+    && adduser -D -u 1000 -G cloudless cloudless
+
+# Create required directories
+RUN mkdir -p /etc/cloudless/certs \
+    && mkdir -p /var/lib/cloudless/raft \
+    && chown -R cloudless:cloudless /etc/cloudless /var/lib/cloudless
+
+# Copy binary from builder
+COPY --from=builder /build/coordinator /usr/local/bin/coordinator
+
+# Copy default configuration
+COPY config/coordinator.yaml /etc/cloudless/coordinator.yaml
+
+# Set user
+USER cloudless
+
+# Expose ports
+# 8080: gRPC API
+# 8081: HTTP metrics/health
+# 8444: RAFT consensus
+EXPOSE 8080 8081 8444
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
+
+# Set working directory
+WORKDIR /var/lib/cloudless
+
+# Run coordinator
+ENTRYPOINT ["/usr/local/bin/coordinator"]
+CMD ["--config", "/etc/cloudless/coordinator.yaml"]
