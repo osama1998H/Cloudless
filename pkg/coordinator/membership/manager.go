@@ -393,10 +393,24 @@ func (m *Manager) ProcessHeartbeat(ctx context.Context, req *api.HeartbeatReques
 	if req.Fragments != nil {
 		node.Fragments = make([]FragmentInfo, 0, len(req.Fragments))
 		for _, frag := range req.Fragments {
-			node.Fragments = append(node.Fragments, FragmentInfo{
-				// TODO: Map fields from protobuf FragmentStatus
-				State: frag.GetState().String(),
-			})
+			fragmentInfo := FragmentInfo{
+				ID:         frag.Id,
+				WorkloadID: frag.WorkloadId,
+				State:      frag.State.String(),
+			}
+
+			// Map resources if available
+			if frag.Resources != nil {
+				fragmentInfo.Resources = ResourceCapacity{
+					CPUMillicores: frag.Resources.CpuMillicores,
+					MemoryBytes:   frag.Resources.MemoryBytes,
+					StorageBytes:  frag.Resources.StorageBytes,
+					BandwidthBPS:  frag.Resources.BandwidthBps,
+					GPUCount:      frag.Resources.GpuCount,
+				}
+			}
+
+			node.Fragments = append(node.Fragments, fragmentInfo)
 		}
 	}
 

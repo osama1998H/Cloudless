@@ -114,11 +114,13 @@ type Image struct {
 
 // ContainerStats represents container resource usage statistics
 type ContainerStats struct {
-	CPUStats    CPUStats
-	MemoryStats MemoryStats
+	CPUStats     CPUStats
+	MemoryStats  MemoryStats
 	NetworkStats NetworkStats
 	BlockIOStats BlockIOStats
-	Timestamp   time.Time
+	StorageStats StorageStats
+	GPUStats     GPUStats
+	Timestamp    time.Time
 }
 
 // CPUStats represents CPU usage statistics
@@ -156,6 +158,22 @@ type BlockIOStats struct {
 	WriteBytes uint64
 	ReadOps    uint64
 	WriteOps   uint64
+}
+
+// StorageStats represents storage usage statistics
+type StorageStats struct {
+	UsageBytes uint64
+	LimitBytes uint64
+	IOPSRead   uint64
+	IOPSWrite  uint64
+}
+
+// GPUStats represents GPU usage statistics
+type GPUStats struct {
+	DeviceCount        int32
+	UtilizationPercent float64
+	MemoryUsedBytes    uint64
+	MemoryTotalBytes   uint64
 }
 
 // LogEntry represents a container log entry

@@ -15,41 +15,107 @@ import (
 
 // RunContainer starts a new container
 func (a *Agent) RunContainer(ctx context.Context, req *api.RunContainerRequest) (*api.RunContainerResponse, error) {
+	workload := req.GetWorkload()
+	if workload == nil {
+		return nil, fmt.Errorf("workload is required")
+	}
+
+	spec := workload.GetSpec()
+	if spec == nil {
+		return nil, fmt.Errorf("workload spec is required")
+	}
+
 	a.logger.Info("Running container",
-		zap.String("image", req.Image),
-		zap.String("name", req.Name),
+		zap.String("workload_id", workload.Id),
+		zap.String("image", spec.Image),
+		zap.String("fragment_id", req.FragmentId),
 	)
 
 	// Pull image if it doesn't exist
-	if err := a.runtime.PullImage(ctx, req.Image); err != nil {
+	if err := a.runtime.PullImage(ctx, spec.Image); err != nil {
 		a.logger.Warn("Failed to pull image, continuing anyway",
-			zap.String("image", req.Image),
+			zap.String("image", spec.Image),
 			zap.Error(err),
 		)
 		// Continue - image might already exist
 	}
 
-	// Convert API request to runtime spec
-	spec := runtime.ContainerSpec{
-		Name:  req.Name,
-		Image: req.Image,
-		// TODO: Map environment variables, volumes, ports, etc.
+	// Map volumes
+	mounts := make([]runtime.Mount, 0, len(spec.Volumes))
+	for _, vol := range spec.Volumes {
+		mounts = append(mounts, runtime.Mount{
+			Source:      vol.Source,
+			Destination: vol.MountPath,
+			Type:        "bind",
+			ReadOnly:    vol.ReadOnly,
+		})
 	}
 
-	// Map resource limits if provided
-	if req.Resources != nil {
-		spec.Resources = runtime.ResourceLimits{
-			CPUMillicores: int64(req.Resources.CpuMillicores),
-			MemoryBytes:   req.Resources.MemoryBytes,
-			// TODO: Map other resource limits
-		}
+	// Map ports
+	ports := make([]runtime.PortMapping, 0, len(spec.Ports))
+	for _, port := range spec.Ports {
+		ports = append(ports, runtime.PortMapping{
+			ContainerPort: port.ContainerPort,
+			HostPort:      port.HostPort,
+			Protocol:      port.Protocol,
+		})
+	}
+
+	// Map resources
+	resources := runtime.ResourceRequirements{
+		Requests: runtime.ResourceList{
+			CPUMillicores: spec.Resources.Requests.CpuMillicores,
+			MemoryBytes:   spec.Resources.Requests.MemoryBytes,
+			StorageBytes:  spec.Resources.Requests.StorageBytes,
+		},
+		Limits: runtime.ResourceList{
+			CPUMillicores: spec.Resources.Limits.CpuMillicores,
+			MemoryBytes:   spec.Resources.Limits.MemoryBytes,
+			StorageBytes:  spec.Resources.Limits.StorageBytes,
+		},
+	}
+
+	// Map restart policy
+	restartPolicy := runtime.RestartPolicy{
+		Name:              "on-failure",
+		MaximumRetryCount: int(spec.RestartPolicy.MaxRetries),
+	}
+	if spec.RestartPolicy.Policy == 0 { // ALWAYS
+		restartPolicy.Name = "always"
+	} else if spec.RestartPolicy.Policy == 2 { // NEVER
+		restartPolicy.Name = "no"
+	}
+
+	// Convert API request to runtime spec
+	containerSpec := runtime.ContainerSpec{
+		ID:      fmt.Sprintf("%s-%s", workload.Id, req.FragmentId),
+		Name:    fmt.Sprintf("%s-%s-%s", workload.Namespace, workload.Name, req.FragmentId),
+		Image:   spec.Image,
+		Command: spec.Command,
+		Args:    spec.Args,
+		Env:     spec.Env,
+		Labels: map[string]string{
+			"workload.id":        workload.Id,
+			"workload.name":      workload.Name,
+			"workload.namespace": workload.Namespace,
+			"fragment.id":        req.FragmentId,
+			"replica.id":         req.ReplicaId,
+		},
+		Annotations:   workload.Annotations,
+		Resources:     resources,
+		Network: runtime.NetworkConfig{
+			NetworkMode: "bridge",
+			Ports:       ports,
+		},
+		Mounts:        mounts,
+		RestartPolicy: restartPolicy,
 	}
 
 	// Create the container
-	container, err := a.runtime.CreateContainer(ctx, spec)
+	container, err := a.runtime.CreateContainer(ctx, containerSpec)
 	if err != nil {
 		a.logger.Error("Failed to create container",
-			zap.String("image", req.Image),
+			zap.String("image", spec.Image),
 			zap.Error(err),
 		)
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -68,11 +134,12 @@ func (a *Agent) RunContainer(ctx context.Context, req *api.RunContainerRequest) 
 
 	a.logger.Info("Container started successfully",
 		zap.String("container_id", container.ID),
-		zap.String("image", req.Image),
+		zap.String("workload_id", workload.Id),
 	)
 
 	return &api.RunContainerResponse{
 		ContainerId: container.ID,
+		Status:      "running",
 	}, nil
 }
 
@@ -138,10 +205,15 @@ func (a *Agent) GetContainerStatus(ctx context.Context, req *api.GetContainerSta
 			)
 			// Continue without stats rather than failing the entire request
 		} else {
+			// Calculate bandwidth from network stats (total bytes per second approximation)
+			bandwidthBps := int64(containerStats.NetworkStats.RxBytes + containerStats.NetworkStats.TxBytes)
+
 			stats = &api.ResourceUsage{
 				CpuMillicores: int32(containerStats.CPUStats.UsageNanoseconds / 1000000), // Convert nanoseconds to millicores (approximate)
 				MemoryBytes:   int64(containerStats.MemoryStats.UsageBytes),
-				// TODO: Map other resource stats
+				StorageBytes:  int64(containerStats.StorageStats.UsageBytes),
+				BandwidthBps:  bandwidthBps,
+				GpuCount:      containerStats.GPUStats.DeviceCount,
 			}
 		}
 	}
@@ -318,7 +390,17 @@ func (a *Agent) GetFragments(ctx context.Context, req *api.GetFragmentsRequest) 
 				MemoryBytes:   int64(stats.MemoryStats.UsageBytes),
 			},
 			CreatedAt: timestamppb.New(container.CreatedAt),
-			// TODO: Map workload information if available from labels/metadata
+		}
+
+		// Extract workload information from container labels
+		if workloadID, ok := container.Labels["workload.id"]; ok {
+			fragment.WorkloadId = workloadID
+		}
+		if fragmentID, ok := container.Labels["fragment.id"]; ok {
+			fragment.Id = fragmentID
+		}
+		if nodeID := a.config.NodeID; nodeID != "" {
+			fragment.NodeId = nodeID
 		}
 
 		fragments = append(fragments, fragment)

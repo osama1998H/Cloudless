@@ -241,7 +241,19 @@ func parseV1Metrics(m *v1.Metrics) *ContainerStats {
 			ReadOps:    readOps,
 			WriteOps:   writeOps,
 		}
+
+		// Estimate storage usage from block I/O
+		totalIO := readBytes + writeBytes
+		stats.StorageStats = StorageStats{
+			UsageBytes: totalIO, // Approximation
+			IOPSRead:   readOps,
+			IOPSWrite:  writeOps,
+		}
 	}
+
+	// GPU stats are not available in cgroups v1
+	// Would need to be collected separately via nvidia-smi or similar
+	stats.GPUStats = GPUStats{}
 
 	return stats
 }
@@ -284,18 +296,28 @@ func parseV2Metrics(m *v2.Metrics) *ContainerStats {
 
 	// Parse I/O stats (cgroups v2 combines block I/O)
 	if m.Io != nil && m.Io.Usage != nil {
-		var readBytes, writeBytes uint64
+		var readBytes, writeBytes, readOps, writeOps uint64
 
 		for _, entry := range m.Io.Usage {
 			readBytes += entry.Rbytes
 			writeBytes += entry.Wbytes
+			readOps += entry.Rios
+			writeOps += entry.Wios
 		}
 
 		stats.BlockIOStats = BlockIOStats{
 			ReadBytes:  readBytes,
 			WriteBytes: writeBytes,
-			ReadOps:    0, // Cgroups v2 doesn't provide operation counts in the same way
-			WriteOps:   0,
+			ReadOps:    readOps,
+			WriteOps:   writeOps,
+		}
+
+		// Estimate storage usage from block I/O
+		totalIO := readBytes + writeBytes
+		stats.StorageStats = StorageStats{
+			UsageBytes: totalIO, // Approximation
+			IOPSRead:   readOps,
+			IOPSWrite:  writeOps,
 		}
 	}
 
@@ -303,6 +325,10 @@ func parseV2Metrics(m *v2.Metrics) *ContainerStats {
 	// Network stats would need to be collected separately via netlink or /proc
 	// For now, leave NetworkStats as zero values
 	stats.NetworkStats = NetworkStats{}
+
+	// GPU stats are not available in cgroups v2
+	// Would need to be collected separately via nvidia-smi or similar
+	stats.GPUStats = GPUStats{}
 
 	return stats
 }
