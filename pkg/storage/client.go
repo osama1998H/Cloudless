@@ -167,7 +167,7 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte,
 
 	// Apply options
 	for _, opt := range opts {
-		opt(req)
+		opt.apply(req)
 	}
 
 	return c.withRetry(ctx, func() error {

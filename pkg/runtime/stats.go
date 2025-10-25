@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/containerd/containerd"
 	v1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	v2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	"github.com/containerd/cgroups/v3"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // GetContainerStats retrieves resource usage statistics for a container
@@ -40,8 +41,9 @@ func (r *ContainerdRuntime) GetContainerStats(ctx context.Context, containerID s
 	// Cgroups v2 (Unified) is the modern cgroups implementation
 	// Cgroups v1 (Legacy) is the older implementation
 	if cgroups.Mode() == cgroups.Unified {
-		// Cgroups v2 parsing
-		if v2Metrics, ok := metric.Data.(*v2.Metrics); ok {
+		// Cgroups v2 parsing - unmarshal from Any
+		v2Metrics := &v2.Metrics{}
+		if err := anypb.UnmarshalTo(metric.Data, v2Metrics, proto.UnmarshalOptions{}); err == nil {
 			stats = parseV2Metrics(v2Metrics)
 			r.logger.Debug("Parsed cgroups v2 metrics",
 				zap.String("container", containerID),
@@ -49,13 +51,15 @@ func (r *ContainerdRuntime) GetContainerStats(ctx context.Context, containerID s
 				zap.Uint64("memory_usage", stats.MemoryStats.UsageBytes),
 			)
 		} else {
-			r.logger.Warn("Failed to cast metrics to cgroups v2 format",
+			r.logger.Warn("Failed to unmarshal cgroups v2 metrics",
 				zap.String("container", containerID),
+				zap.Error(err),
 			)
 		}
 	} else {
-		// Cgroups v1 parsing
-		if v1Metrics, ok := metric.Data.(*v1.Metrics); ok {
+		// Cgroups v1 parsing - unmarshal from Any
+		v1Metrics := &v1.Metrics{}
+		if err := anypb.UnmarshalTo(metric.Data, v1Metrics, proto.UnmarshalOptions{}); err == nil {
 			stats = parseV1Metrics(v1Metrics)
 			r.logger.Debug("Parsed cgroups v1 metrics",
 				zap.String("container", containerID),
@@ -63,8 +67,9 @@ func (r *ContainerdRuntime) GetContainerStats(ctx context.Context, containerID s
 				zap.Uint64("memory_usage", stats.MemoryStats.UsageBytes),
 			)
 		} else {
-			r.logger.Warn("Failed to cast metrics to cgroups v1 format",
+			r.logger.Warn("Failed to unmarshal cgroups v1 metrics",
 				zap.String("container", containerID),
+				zap.Error(err),
 			)
 		}
 	}
@@ -131,7 +136,8 @@ func (r *ContainerdRuntime) GetResourceUsage(ctx context.Context) (ResourceList,
 		}
 
 		if cgroups.Mode() == cgroups.Unified {
-			if v2Metrics, ok := metric.Data.(*v2.Metrics); ok {
+			v2Metrics := &v2.Metrics{}
+			if err := anypb.UnmarshalTo(metric.Data, v2Metrics, proto.UnmarshalOptions{}); err == nil {
 				if v2Metrics.CPU != nil {
 					// Convert CPU usage to millicores (approximate)
 					totalCPU += int64(v2Metrics.CPU.UsageUsec / 1000)
@@ -173,12 +179,8 @@ func parseV1Metrics(m *v1.Metrics) *ContainerStats {
 			MaxUsageBytes: m.Memory.Usage.Max,
 			LimitBytes:    m.Memory.Usage.Limit,
 		}
-		if m.Memory.Cache != nil {
-			stats.MemoryStats.CacheBytes = *m.Memory.Cache
-		}
-		if m.Memory.RSS != nil {
-			stats.MemoryStats.RSSBytes = *m.Memory.RSS
-		}
+		stats.MemoryStats.CacheBytes = m.Memory.Cache
+		stats.MemoryStats.RSSBytes = m.Memory.RSS
 		if m.Memory.Swap != nil {
 			stats.MemoryStats.SwapUsageBytes = m.Memory.Swap.Usage
 		}
@@ -270,9 +272,7 @@ func parseV2Metrics(m *v2.Metrics) *ContainerStats {
 			UsageNanoseconds:  m.CPU.UsageUsec * 1000, // Convert microseconds to nanoseconds
 			SystemNanoseconds: m.CPU.SystemUsec * 1000,
 		}
-		if m.CPU.NrThrottled != nil {
-			stats.CPUStats.ThrottlingCount = *m.CPU.NrThrottled
-		}
+		stats.CPUStats.ThrottlingCount = m.CPU.NrThrottled
 	}
 
 	// Parse memory stats
@@ -281,17 +281,11 @@ func parseV2Metrics(m *v2.Metrics) *ContainerStats {
 			UsageBytes:     m.Memory.Usage,
 			SwapUsageBytes: m.Memory.SwapUsage,
 		}
-		if m.Memory.UsageLimit != nil {
-			stats.MemoryStats.LimitBytes = *m.Memory.UsageLimit
-		}
+		stats.MemoryStats.LimitBytes = m.Memory.UsageLimit
 		// Cgroups v2 provides file cache in the memory stats
-		if m.Memory.File != nil {
-			stats.MemoryStats.CacheBytes = *m.Memory.File
-		}
+		stats.MemoryStats.CacheBytes = m.Memory.File
 		// RSS in cgroups v2 is called "anon"
-		if m.Memory.Anon != nil {
-			stats.MemoryStats.RSSBytes = *m.Memory.Anon
-		}
+		stats.MemoryStats.RSSBytes = m.Memory.Anon
 	}
 
 	// Parse I/O stats (cgroups v2 combines block I/O)

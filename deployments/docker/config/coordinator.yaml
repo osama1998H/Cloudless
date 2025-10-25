@@ -1,0 +1,66 @@
+# Cloudless Coordinator Configuration
+
+# Server settings
+server:
+  bind_address: "0.0.0.0:8080"
+  http_gateway_address: "0.0.0.0:8081"
+  metrics_address: "0.0.0.0:9090"
+
+# TLS/mTLS settings
+tls:
+  enabled: true
+  cert: "/etc/cloudless/certs/coordinator.crt"
+  key: "/etc/cloudless/certs/coordinator.key"
+  ca: "/etc/cloudless/certs/ca.crt"
+  client_auth: true
+
+# RAFT consensus settings
+raft:
+  id: "coordinator-1"
+  addr: "172.28.0.10:3000"
+  data_dir: "/data/raft"
+  bootstrap: true
+  snapshot_interval: 3600
+  snapshot_threshold: 10000
+
+# Scheduler settings
+scheduler:
+  enabled: true
+  interval: "5s"
+  max_scheduling_attempts: 3
+
+  # Placement strategies
+  strategies:
+    - name: "resource-based"
+      weight: 70
+    - name: "locality-aware"
+      weight: 20
+    - name: "load-balancing"
+      weight: 10
+
+# Storage settings
+storage:
+  replication_factor: 3
+  chunk_size: 4194304  # 4MB
+  enable_compression: false
+  enable_read_repair: true
+  quorum_writes: true
+
+# Networking settings
+networking:
+  overlay_enabled: true
+  quic_enabled: true
+  service_mesh_enabled: true
+
+# Monitoring and observability
+observability:
+  metrics_enabled: true
+  tracing_enabled: true
+  jaeger_endpoint: "jaeger:14268"
+  prometheus_scrape_interval: "15s"
+
+# Logging
+logging:
+  level: "debug"
+  format: "json"
+  output: "stdout"

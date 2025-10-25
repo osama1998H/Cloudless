@@ -25,19 +25,22 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:3.18
 
-# Install runtime dependencies
-# Note: containerd socket will be mounted from host
+# Install runtime dependencies including containerd
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
+    containerd \
+    runc \
     && addgroup -g 1000 cloudless \
     && adduser -D -u 1000 -G cloudless cloudless
 
 # Create required directories
 RUN mkdir -p /etc/cloudless/certs \
-    && mkdir -p /var/lib/cloudless/storage \
-    && mkdir -p /var/lib/cloudless/certs \
-    && chown -R cloudless:cloudless /etc/cloudless /var/lib/cloudless
+    && mkdir -p /data/storage \
+    && mkdir -p /var/lib/cloudless \
+    && mkdir -p /run/containerd \
+    && mkdir -p /etc/containerd \
+    && chown -R cloudless:cloudless /etc/cloudless /var/lib/cloudless /data
 
 # Copy binary from builder
 COPY --from=builder /build/agent /usr/local/bin/agent
@@ -45,8 +48,13 @@ COPY --from=builder /build/agent /usr/local/bin/agent
 # Copy default configuration
 COPY config/agent.yaml /etc/cloudless/agent.yaml
 
-# Set user
-USER cloudless
+# Copy entrypoint script
+COPY deployments/docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+RUN chmod +x /usr/local/bin/agent-entrypoint.sh
+
+# Run as root (containerd daemon requires root)
+# Agent process will handle privilege dropping if needed
+USER root
 
 # Expose ports
 # 8090: gRPC API
@@ -60,8 +68,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:9092/health || exit 1
 
 # Set working directory
-WORKDIR /var/lib/cloudless
+WORKDIR /data
 
-# Run agent
-ENTRYPOINT ["/usr/local/bin/agent"]
+# Run agent via entrypoint script (starts containerd first)
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]
 CMD ["--config", "/etc/cloudless/agent.yaml"]

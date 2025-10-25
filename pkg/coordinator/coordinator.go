@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/cloudless/cloudless/pkg/overlay"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"github.com/cloudless/cloudless/pkg/scheduler"
+	hashicorpraft "github.com/hashicorp/raft"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -99,11 +101,12 @@ type Coordinator struct {
 	logger *zap.Logger
 
 	// Core components
-	raftStore       *raft.Store
-	membershipMgr   *membership.Manager
-	scheduler       *scheduler.Scheduler
-	ca              *mtls.CA
-	tokenManager    *mtls.TokenManager
+	raftStore        *raft.Store
+	membershipMgr    *membership.Manager
+	scheduler        *scheduler.Scheduler
+	ca               *mtls.CA
+	certManager      *mtls.CertificateManager
+	tokenManager     *mtls.TokenManager
 	workloadStateMgr *WorkloadStateManager
 
 	// Overlay networking components
@@ -158,6 +161,20 @@ func New(config *Config) (*Coordinator, error) {
 	}
 	c.ca = ca
 
+	// Initialize Certificate Manager
+	config.Logger.Info("Initializing Certificate Manager")
+	certManagerConfig := mtls.CertificateManagerConfig{
+		CA:               ca,
+		DataDir:          config.DataDir,
+		Logger:           config.Logger,
+		RotationInterval: 24 * time.Hour,
+	}
+	certManager, err := mtls.NewCertificateManager(certManagerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize certificate manager: %w", err)
+	}
+	c.certManager = certManager
+
 	// Initialize Token Manager
 	config.Logger.Info("Initializing Token Manager")
 	tokenManagerConfig := mtls.TokenManagerConfig{
@@ -170,35 +187,71 @@ func New(config *Config) (*Coordinator, error) {
 	}
 	c.tokenManager = tokenManager
 
-	// Initialize Membership Manager
-	config.Logger.Info("Initializing Membership Manager")
-	membershipConfig := membership.ManagerConfig{
-		HeartbeatInterval: config.HeartbeatInterval,
-		HeartbeatTimeout:  config.HeartbeatTimeout,
-		CleanupInterval:   1 * time.Minute,
+	// Generate a bootstrap token for development/testing
+	// TODO: Remove this in production and use proper token management API
+	bootstrapToken, err := tokenManager.GenerateToken("", "", "", "", 365*24*time.Hour, 999)
+	if err != nil {
+		config.Logger.Warn("Failed to generate bootstrap token", zap.Error(err))
+	} else {
+		config.Logger.Info("Generated bootstrap token for development",
+			zap.String("token", bootstrapToken.Token),
+			zap.String("token_id", bootstrapToken.ID),
+			zap.Time("expires_at", bootstrapToken.ExpiresAt),
+			zap.Int("max_uses", bootstrapToken.MaxUses),
+		)
 	}
-	membershipMgr := membership.NewManager(membershipConfig, config.Logger)
-	c.membershipMgr = membershipMgr
 
-	// Initialize Scheduler
-	config.Logger.Info("Initializing Scheduler")
-	schedulerInstance := scheduler.NewScheduler(config.SchedulerConfig, config.Logger)
-	c.scheduler = schedulerInstance
-
-	// Initialize RAFT Store
+	// Initialize RAFT Store (must be before membership manager)
 	config.Logger.Info("Initializing RAFT Store")
-	raftConfig := raft.Config{
-		RaftID:        config.RaftID,
-		RaftAddr:      config.RaftAddr,
-		RaftDir:       raftDir,
-		Bootstrap:     config.RaftBootstrap,
-		SnapshotCount: 1024,
+	raftConfig := &raft.Config{
+		RaftID:         config.RaftID,
+		RaftBind:       config.RaftAddr,
+		RaftDir:        raftDir,
+		Bootstrap:      config.RaftBootstrap,
+		Logger:         config.Logger,
+		LocalID:        hashicorpraft.ServerID(config.RaftID),
+		EnableSingle:   config.RaftBootstrap,
+		SnapshotRetain: 2,
 	}
-	raftStore, err := raft.NewStore(raftConfig, config.Logger)
+	raftStore, err := raft.NewStore(raftConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize RAFT store: %w", err)
 	}
 	c.raftStore = raftStore
+
+	// Initialize Membership Manager
+	config.Logger.Info("Initializing Membership Manager")
+	membershipConfig := membership.ManagerConfig{
+		Store:        raftStore,
+		TokenManager: tokenManager,
+		CertManager:  certManager,
+		Logger:       config.Logger,
+	}
+	membershipMgr, err := membership.NewManager(membershipConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize membership manager: %w", err)
+	}
+	c.membershipMgr = membershipMgr
+
+	// Initialize Scheduler
+	config.Logger.Info("Initializing Scheduler")
+	schedulerConfig := &scheduler.SchedulerConfig{
+		LocalityWeight:     config.SchedulerConfig.LocalityWeight,
+		ReliabilityWeight:  config.SchedulerConfig.ReliabilityWeight,
+		CostWeight:         config.SchedulerConfig.CostWeight,
+		UtilizationWeight:  config.SchedulerConfig.UtilizationWeight,
+		NetworkWeight:      config.SchedulerConfig.NetworkWeight,
+		MaxRetries:         5,
+		RetryBackoff:       5 * time.Second,
+		SpreadPolicy:       "zone",
+		PackingStrategy:    "binpack",
+		EnforcePlacement:   false,
+	}
+	schedulerInstance, err := scheduler.NewScheduler(membershipMgr, schedulerConfig, config.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize scheduler: %w", err)
+	}
+	c.scheduler = schedulerInstance
 
 	// Initialize Workload State Manager
 	config.Logger.Info("Initializing Workload State Manager")
@@ -218,11 +271,32 @@ func New(config *Config) (*Coordinator, error) {
 	if config.OverlayConfig.Transport.ListenAddress == "" {
 		config.OverlayConfig.Transport.ListenAddress = ":9090" // Default overlay port
 	}
+	if config.OverlayConfig.Mesh.HealthCheckInterval == 0 {
+		config.OverlayConfig.Mesh.HealthCheckInterval = 30 * time.Second
+	}
+	if config.OverlayConfig.Mesh.ReconnectInterval == 0 {
+		config.OverlayConfig.Mesh.ReconnectInterval = 60 * time.Second
+	}
+	if config.OverlayConfig.Mesh.ConnectionTimeout == 0 {
+		config.OverlayConfig.Mesh.ConnectionTimeout = 10 * time.Second
+	}
 
-	// Create TLS config from CA
-	serverCert, err := ca.IssueCertificate(config.RaftID, []string{config.RaftID})
+	// Create TLS config from CertificateManager
+	serverCertificate, err := certManager.GenerateNodeCertificate(
+		config.RaftID,
+		config.RaftID,
+		[]net.IP{net.ParseIP("127.0.0.1")},
+		[]string{config.RaftID, "localhost"},
+		365, // 1 year validity
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to issue server certificate: %w", err)
+		return nil, fmt.Errorf("failed to generate server certificate: %w", err)
+	}
+
+	// Convert to tls.Certificate
+	serverCert, err := tls.X509KeyPair(serverCertificate.CertPEM, serverCertificate.KeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS certificate: %w", err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -296,47 +370,24 @@ func New(config *Config) (*Coordinator, error) {
 func (c *Coordinator) Start(ctx context.Context) error {
 	c.logger.Info("Starting coordinator")
 
-	// Start RAFT Store
-	if err := c.raftStore.Open(); err != nil {
-		return fmt.Errorf("failed to start RAFT store: %w", err)
-	}
-
-	// If bootstrapping, initialize cluster
-	if c.config.RaftBootstrap {
-		c.logger.Info("Bootstrapping new cluster")
-		if err := c.raftStore.Bootstrap(); err != nil {
-			return fmt.Errorf("failed to bootstrap RAFT cluster: %w", err)
-		}
-	}
-
+	// RAFT store is already initialized and bootstrapped during NewStore()
 	// Wait for leader election
 	c.logger.Info("Waiting for leader election")
-	timeout := time.After(30 * time.Second)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for leader election")
-		case <-ticker.C:
-			if c.raftStore.IsLeader() {
-				c.isLeader = true
-				c.logger.Info("This node is the leader")
-				goto leaderElected
-			}
-			leader := c.raftStore.Leader()
-			if leader != "" {
-				c.logger.Info("Leader elected", zap.String("leader", leader))
-				goto leaderElected
-			}
-		}
+	if err := c.raftStore.WaitForLeader(30 * time.Second); err != nil {
+		return fmt.Errorf("timeout waiting for leader election: %w", err)
 	}
 
-leaderElected:
+	// Check if this node is the leader
+	if c.raftStore.IsLeader() {
+		c.isLeader = true
+		c.logger.Info("This node is the leader")
+	} else {
+		leader := c.raftStore.GetLeader()
+		c.logger.Info("Leader elected", zap.String("leader", leader))
+	}
 
 	// Start Membership Manager
-	if err := c.membershipMgr.Start(); err != nil {
+	if err := c.membershipMgr.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start membership manager: %w", err)
 	}
 
@@ -401,7 +452,7 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 
 	// Stop Membership Manager
 	if c.membershipMgr != nil {
-		if err := c.membershipMgr.Stop(); err != nil {
+		if err := c.membershipMgr.Stop(ctx); err != nil {
 			c.logger.Error("Failed to stop membership manager", zap.Error(err))
 		}
 	}
@@ -456,7 +507,7 @@ func (c *Coordinator) GetLeader() string {
 	if c.raftStore == nil {
 		return ""
 	}
-	return c.raftStore.Leader()
+	return c.raftStore.GetLeader()
 }
 
 // JoinCluster joins an existing RAFT cluster
@@ -473,24 +524,26 @@ func (c *Coordinator) ScheduleWorkload(ctx context.Context, spec scheduler.Workl
 		return nil, fmt.Errorf("not the leader, redirect to: %s", c.GetLeader())
 	}
 
-	// Get all ready nodes
-	nodes := c.membershipMgr.ListNodes(membership.StateReady)
-	if len(nodes) == 0 {
-		return nil, fmt.Errorf("no ready nodes available")
-	}
-
 	// Schedule the workload
-	decisions, err := c.scheduler.Schedule(ctx, spec, nodes)
+	result, err := c.scheduler.Schedule(ctx, &spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to schedule workload: %w", err)
 	}
 
+	if !result.Success {
+		c.logger.Warn("Workload scheduling incomplete",
+			zap.String("workload", spec.Name),
+			zap.String("message", result.Message),
+			zap.Int("unscheduled", result.UnscheduledReplicas),
+		)
+	}
+
 	c.logger.Info("Workload scheduled",
 		zap.String("workload", spec.Name),
-		zap.Int("replicas", len(decisions)),
+		zap.Int("replicas", len(result.Decisions)),
 	)
 
-	return decisions, nil
+	return result.Decisions, nil
 }
 
 // Overlay Networking Methods

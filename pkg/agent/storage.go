@@ -301,7 +301,7 @@ func (sa *StorageAgent) GetStorageStats() *storage.NodeStorageStats {
 		UsedBytes:      totalUsed,
 		AvailableBytes: totalCapacity - totalUsed,
 		ChunkCount:     int64(len(sa.chunkStore.ListChunks())),
-		VolumeCount:    volumeStats.TotalVolumes,
+		VolumeCount:    int64(volumeStats.TotalVolumes),
 	}
 
 	return stats
@@ -365,7 +365,7 @@ func (a *Agent) GetStorageCapacity() *StorageCapacity {
 	capacity := &StorageCapacity{
 		TotalBytes:     500 * 1024 * 1024 * 1024, // 500GB
 		AvailableBytes: 400 * 1024 * 1024 * 1024, // 400GB
-		IOPSClass:      storage.IOPSMedium,
+		IOPSClass:      storage.IOPSClassMedium,
 		StorageClass:   storage.StorageClassHot,
 	}
 

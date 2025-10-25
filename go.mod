@@ -7,6 +7,7 @@ toolchain go1.24.1
 require (
 	github.com/containerd/cgroups/v3 v3.0.5
 	github.com/containerd/containerd v1.7.11
+	github.com/containerd/errdefs v1.0.0
 	github.com/golang-jwt/jwt/v5 v5.2.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.5.0

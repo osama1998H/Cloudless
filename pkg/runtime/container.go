@@ -116,7 +116,7 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 	}
 
 	// GPU device access
-	if spec.Resources.GPUCount > 0 {
+	if spec.Resources.Limits.GPUCount > 0 {
 		specOpts = append(specOpts, func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
 			if s.Linux == nil {
 				s.Linux = &specs.Linux{}
@@ -159,7 +159,7 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 			if c.Labels == nil {
 				c.Labels = make(map[string]string)
 			}
-			c.Labels["cloudless.gpu.count"] = fmt.Sprintf("%d", spec.Resources.GPUCount)
+			c.Labels["cloudless.gpu.count"] = fmt.Sprintf("%d", spec.Resources.Limits.GPUCount)
 
 			return nil
 		})
@@ -167,7 +167,7 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 
 	// Add mounts
 	for _, mount := range spec.Mounts {
-		specOpts = append(specOpts, oci.WithMounts([]oci.Mount{
+		specOpts = append(specOpts, oci.WithMounts([]specs.Mount{
 			{
 				Source:      mount.Source,
 				Destination: mount.Destination,

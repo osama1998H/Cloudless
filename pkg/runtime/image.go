@@ -6,6 +6,7 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/errdefs"
 	"go.uber.org/zap"
 )
 
@@ -119,7 +120,7 @@ func (r *ContainerdRuntime) ImageExists(ctx context.Context, imageRef string) (b
 
 	_, err := r.client.GetImage(ctx, imageRef)
 	if err != nil {
-		if containerd.IsNotFound(err) {
+		if errdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err

@@ -31,13 +31,29 @@ type PeerManager struct {
 func NewPeerManager(nodeID string, transport *QUICTransport, config MeshConfig, logger *zap.Logger) *PeerManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Set default intervals if not configured
+	healthCheckInterval := config.HealthCheckInterval
+	if healthCheckInterval == 0 {
+		healthCheckInterval = 30 * time.Second
+	}
+
+	reconnectInterval := config.ReconnectInterval
+	if reconnectInterval == 0 {
+		reconnectInterval = 60 * time.Second
+	}
+
+	connectionTimeout := config.ConnectionTimeout
+	if connectionTimeout == 0 {
+		connectionTimeout = 10 * time.Second
+	}
+
 	return &PeerManager{
 		nodeID:              nodeID,
 		transport:           transport,
 		logger:              logger,
-		healthCheckInterval: config.HealthCheckInterval,
-		reconnectInterval:   config.ReconnectInterval,
-		connectionTimeout:   config.ConnectionTimeout,
+		healthCheckInterval: healthCheckInterval,
+		reconnectInterval:   reconnectInterval,
+		connectionTimeout:   connectionTimeout,
 		ctx:                 ctx,
 		cancel:              cancel,
 	}

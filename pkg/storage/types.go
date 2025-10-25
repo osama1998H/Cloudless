@@ -97,19 +97,36 @@ type Replica struct {
 	Checksum     string
 }
 
+// VolumeState represents the state of a volume
+type VolumeState string
+
+const (
+	VolumeStateCreated  VolumeState = "created"
+	VolumeStateMounted  VolumeState = "mounted"
+	VolumeStateDeleted  VolumeState = "deleted"
+	VolumeStateFailed   VolumeState = "failed"
+)
+
 // Volume represents a node-local ephemeral volume
 type Volume struct {
 	ID           string
+	Name         string
 	WorkloadID   string
 	NodeID       string
 	Path         string
 	SizeBytes    int64
 	UsedBytes    int64
 	MountPoint   string
+	MountPath    string
 	ReadOnly     bool
 	StorageClass StorageClass
+	IOPSClass    IOPSClass
+	State        VolumeState
 	CreatedAt    time.Time
+	MountedAt    time.Time
+	LastUsed     time.Time
 	Labels       map[string]string
+	Annotations  map[string]string
 }
 
 // ReplicationFactor defines the number of replicas for data

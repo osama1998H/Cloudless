@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"github.com/cloudless/cloudless/pkg/scheduler"
 	"go.uber.org/zap"

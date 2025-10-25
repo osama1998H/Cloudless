@@ -34,8 +34,9 @@ RUN apk add --no-cache \
 
 # Create required directories
 RUN mkdir -p /etc/cloudless/certs \
-    && mkdir -p /var/lib/cloudless/raft \
-    && chown -R cloudless:cloudless /etc/cloudless /var/lib/cloudless
+    && mkdir -p /data/raft \
+    && mkdir -p /var/lib/cloudless \
+    && chown -R cloudless:cloudless /etc/cloudless /var/lib/cloudless /data
 
 # Copy binary from builder
 COPY --from=builder /build/coordinator /usr/local/bin/coordinator
@@ -57,7 +58,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
 
 # Set working directory
-WORKDIR /var/lib/cloudless
+WORKDIR /data
 
 # Run coordinator
 ENTRYPOINT ["/usr/local/bin/coordinator"]
