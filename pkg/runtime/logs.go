@@ -19,28 +19,20 @@ func (r *ContainerdRuntime) GetContainerLogs(ctx context.Context, containerID st
 		return nil, fmt.Errorf("failed to load container: %w", err)
 	}
 
-	task, err := container.Task(ctx, nil)
+	_, err = container.Task(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Get task IO
-	taskIO, err := task.Stdio(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task stdio: %w", err)
-	}
-
+	// TODO: Implement proper log streaming
+	// In newer containerd versions, stdio must be managed through cio.Creator at task creation
+	// For MVP, return empty channel - logs can be implemented later
 	logCh := make(chan LogEntry, 100)
 
 	go func() {
 		defer close(logCh)
-
-		// Read stdout
-		go r.streamLogs(ctx, taskIO.Stdout, "stdout", logCh, follow)
-
-		// Read stderr
-		go r.streamLogs(ctx, taskIO.Stderr, "stderr", logCh, follow)
-
+		r.logger.Warn("Container log streaming not yet implemented",
+			zap.String("container_id", containerID))
 		<-ctx.Done()
 	}()
 

@@ -68,15 +68,17 @@ type ResourceList struct {
 	CPUMillicores int64
 	MemoryBytes   int64
 	StorageBytes  int64
+	GPUCount      int32
 }
 
 // NetworkConfig defines network configuration for a container
 type NetworkConfig struct {
-	NetworkMode string
-	Hostname    string
-	DNS         []string
-	DNSSearch   []string
-	Ports       []PortMapping
+	NetworkMode   string
+	Hostname      string
+	DNS           []string
+	DNSSearch     []string
+	Ports         []PortMapping
+	BandwidthBPS  int64
 }
 
 // PortMapping defines a port mapping

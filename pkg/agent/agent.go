@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,15 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// Resources represents node resource configuration
+type Resources struct {
+	CPUMillicores int64
+	MemoryBytes   int64
+	StorageBytes  int64
+	BandwidthBps  int64
+	GPU           int32
+}
 
 // Config represents the agent configuration
 type Config struct {
@@ -445,7 +455,7 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 
 		// Use TLS credentials
 		creds := credentials.NewTLS(tlsConfig)
-		opts = append(opts, creds)
+		opts = append(opts, grpc.WithTransportCredentials(creds))
 
 		a.logger.Info("Using mTLS for coordinator connection",
 			zap.String("cert", a.config.CertificateFile),
@@ -490,39 +500,35 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 
 // performEnrollment performs the node enrollment process
 func (a *Agent) performEnrollment(ctx context.Context) error {
-	// Detect hardware accelerator type
-	hwDetector := NewHardwareDetector(a.logger)
-	acceleratorType := hwDetector.DetectAcceleratorType()
-
 	// Prepare enrollment request
 	enrollReq := &api.EnrollNodeRequest{
-		NodeID:   a.config.NodeID,
+		Token:    a.config.JoinToken,
 		NodeName: a.config.NodeName,
-		Address:  a.config.AgentAddr,
 		Region:   a.config.Region,
 		Zone:     a.config.Zone,
-		JoinToken: a.config.JoinToken,
-		Capabilities: api.NodeCapabilities{
-			GPUCount:        a.config.Resources.GPU,
-			AcceleratorType: acceleratorType,
-			NetworkFeatures: []string{"quic", "udp", "tcp"},
-			StorageTypes:    []string{"local", "ephemeral"},
+		Capabilities: &api.NodeCapabilities{
+			ContainerRuntimes: []string{"containerd"},
+			SupportsGpu:       a.config.Resources.GPU > 0,
+			SupportsArm:       false, // Would detect from runtime
+			SupportsX86:       true,  // Would detect from runtime
+			NetworkFeatures:   []string{"quic", "udp", "tcp"},
+			StorageClasses:    []string{"local", "ephemeral"},
 		},
-		Resources: api.NodeResources{
-			CPUMillicores: a.config.Resources.CPUMillicores,
+		Capacity: &api.ResourceCapacity{
+			CpuMillicores: a.config.Resources.CPUMillicores,
 			MemoryBytes:   a.config.Resources.MemoryBytes,
 			StorageBytes:  a.config.Resources.StorageBytes,
-			BandwidthBPS:  a.config.Resources.BandwidthBps,
-			GPUCount:      a.config.Resources.GPU,
+			BandwidthBps:  a.config.Resources.BandwidthBps,
+			GpuCount:      a.config.Resources.GPU,
 		},
 	}
 
 	a.logger.Info("Sending enrollment request",
-		zap.String("node_id", enrollReq.NodeID),
+		zap.String("node_name", enrollReq.NodeName),
 		zap.String("region", enrollReq.Region),
 		zap.String("zone", enrollReq.Zone),
-		zap.Int64("cpu_millicores", enrollReq.Resources.CPUMillicores),
-		zap.Int64("memory_bytes", enrollReq.Resources.MemoryBytes),
+		zap.Int64("cpu_millicores", enrollReq.Capacity.CpuMillicores),
+		zap.Int64("memory_bytes", enrollReq.Capacity.MemoryBytes),
 	)
 
 	// Create coordinator client
@@ -538,6 +544,9 @@ func (a *Agent) performEnrollment(ctx context.Context) error {
 		zap.String("node_id", resp.NodeId),
 	)
 
+	// Update node ID to the one assigned by coordinator
+	a.config.NodeID = resp.NodeId
+
 	// Create certificates directory
 	certsDir := filepath.Join(a.config.DataDir, "certs")
 	if err := os.MkdirAll(certsDir, 0700); err != nil {
@@ -551,15 +560,6 @@ func (a *Agent) performEnrollment(ctx context.Context) error {
 			return fmt.Errorf("failed to save certificate: %w", err)
 		}
 		a.logger.Info("Node certificate saved", zap.String("path", certPath))
-
-		// Also save the key if provided
-		if len(resp.PrivateKey) > 0 {
-			keyPath := filepath.Join(certsDir, "node.key")
-			if err := os.WriteFile(keyPath, resp.PrivateKey, 0600); err != nil {
-				return fmt.Errorf("failed to save private key: %w", err)
-			}
-			a.logger.Info("Node private key saved", zap.String("path", keyPath))
-		}
 	}
 
 	// Store CA certificate
@@ -617,7 +617,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 	)
 
 	// Collect container status
-	containerInfos := []api.ContainerInfo{}
+	containerStatuses := []*api.ContainerStatus{}
 	containers, err := a.runtime.ListContainers(ctx)
 	if err != nil {
 		a.logger.Warn("Failed to list containers", zap.Error(err))
@@ -626,39 +626,27 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 			zap.Int("container_count", len(containers)),
 		)
 
-		// Convert to API container info
+		// Convert to API container status
 		for _, container := range containers {
-			containerInfos = append(containerInfos, api.ContainerInfo{
-				ID:    container.ID,
-				Name:  container.Name,
-				State: container.State,
-				Image: container.Image,
+			containerStatuses = append(containerStatuses, &api.ContainerStatus{
+				ContainerId: container.ID,
+				State:       string(container.State),
+				Image:       container.Image,
 			})
 		}
 	}
 
-	// Collect node conditions
-	conditions := a.computeNodeConditions(snapshot)
-
 	// Prepare heartbeat request
 	heartbeatReq := &api.HeartbeatRequest{
-		NodeID: a.config.NodeID,
-		Capacity: api.NodeResources{
-			CPUMillicores: capacity.CPUMillicores,
-			MemoryBytes:   capacity.MemoryBytes,
-			StorageBytes:  capacity.StorageBytes,
-			BandwidthBPS:  capacity.BandwidthBps,
-			GPUCount:      capacity.GPU,
-		},
-		Usage: api.NodeResources{
-			CPUMillicores: usage.CPUMillicores,
+		NodeId: a.config.NodeID,
+		Usage: &api.ResourceUsage{
+			CpuMillicores: usage.CPUMillicores,
 			MemoryBytes:   usage.MemoryBytes,
 			StorageBytes:  usage.StorageBytes,
-			BandwidthBPS:  usage.BandwidthBps,
-			GPUCount:      usage.GPU,
+			BandwidthBps:  usage.BandwidthBPS,
+			GpuCount:      int32(usage.GPU),
 		},
-		Containers: containerInfos,
-		Conditions: conditions,
+		Containers: containerStatuses,
 	}
 
 	// Create coordinator client
@@ -805,14 +793,14 @@ func (a *Agent) collectAndStoreMetrics(ctx context.Context) error {
 		"node":   a.config.NodeID,
 	})
 
-	if usage.BandwidthBps > 0 {
-		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(usage.BandwidthBps), map[string]string{
+	if usage.BandwidthBPS > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(usage.BandwidthBPS), map[string]string{
 			"source": "node",
 			"node":   a.config.NodeID,
 		})
 	}
 
-	if capacity.GPU > 0 {
+	if capacity.GPUCount > 0 {
 		// GPU usage is tracked as percentage of available GPUs in use
 		a.metricsStorage.RecordMetric(MetricTypeGPU, float64(usage.GPU), map[string]string{
 			"source": "node",

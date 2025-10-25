@@ -466,11 +466,11 @@ func (vm *VolumeManager) GetVolumeStats() VolumeStats {
 
 		// Count by IOPS class
 		switch volume.IOPSClass {
-		case IOPSHigh:
+		case IOPSClassHigh:
 			stats.HighIOPSVolumes++
-		case IOPSMedium:
+		case IOPSClassMedium:
 			stats.MediumIOPSVolumes++
-		case IOPSLow:
+		case IOPSClassLow:
 			stats.LowIOPSVolumes++
 		}
 
@@ -537,17 +537,17 @@ func (vm *VolumeManager) setupVolumeIOPS(volume *Volume) error {
 	// - Set up direct I/O if needed
 
 	switch volume.IOPSClass {
-	case IOPSHigh:
+	case IOPSClassHigh:
 		vm.logger.Debug("Setting up high IOPS volume",
 			zap.String("volume_id", volume.ID),
 		)
 		// Configure for SSD/NVMe performance
-	case IOPSMedium:
+	case IOPSClassMedium:
 		vm.logger.Debug("Setting up medium IOPS volume",
 			zap.String("volume_id", volume.ID),
 		)
 		// Balanced configuration
-	case IOPSLow:
+	case IOPSClassLow:
 		vm.logger.Debug("Setting up low IOPS volume",
 			zap.String("volume_id", volume.ID),
 		)

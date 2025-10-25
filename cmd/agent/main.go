@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -92,6 +93,7 @@ func init() {
 
 	// Set up environment variable binding
 	viper.SetEnvPrefix("CLOUDLESS")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	// Add version command
@@ -173,6 +175,9 @@ func run(cmd *cobra.Command, args []string) error {
 		HeartbeatInterval: viper.GetDuration("heartbeat_interval"),
 		ContainerRuntime: viper.GetString("container.runtime"),
 		ContainerSocket:  viper.GetString("container.socket"),
+		CertificateFile:  viper.GetString("tls.cert"),
+		KeyFile:          viper.GetString("tls.key"),
+		CAFile:           viper.GetString("tls.ca"),
 		Resources:        resources,
 		Logger:           logger,
 	}
@@ -328,42 +333,50 @@ func startMetricsServer(addr string, logger *zap.Logger) *http.Server {
 func detectResources(logger *zap.Logger) agent.Resources {
 	resources := agent.Resources{}
 
-	// CPU cores detection
+	// CPU cores detection - convert to millicores (1 core = 1000 millicores)
 	if cpuCores := viper.GetInt("resources.cpu_cores"); cpuCores > 0 {
-		resources.CPUCores = cpuCores
+		resources.CPUMillicores = int64(cpuCores * 1000)
 	} else {
-		resources.CPUCores = runtime.NumCPU()
+		resources.CPUMillicores = int64(runtime.NumCPU() * 1000)
 	}
 
-	// Memory detection (simplified - would use more sophisticated methods in production)
+	// Memory detection - convert MB to bytes
 	if memoryMB := viper.GetInt("resources.memory_mb"); memoryMB > 0 {
-		resources.MemoryMB = memoryMB
+		resources.MemoryBytes = int64(memoryMB) * 1024 * 1024
 	} else {
-		// Default to 4GB for now, would use syscall or /proc/meminfo in production
-		resources.MemoryMB = 4096
+		// Default to 4GB
+		resources.MemoryBytes = int64(4096) * 1024 * 1024
 	}
 
-	// Storage detection
+	// Storage detection - convert GB to bytes
 	if storageGB := viper.GetInt("resources.storage_gb"); storageGB > 0 {
-		resources.StorageGB = storageGB
+		resources.StorageBytes = int64(storageGB) * 1024 * 1024 * 1024
 	} else {
-		// Default to 100GB for now, would use df or statfs in production
-		resources.StorageGB = 100
+		// Default to 100GB
+		resources.StorageBytes = int64(100) * 1024 * 1024 * 1024
 	}
 
-	// Bandwidth detection
+	// Bandwidth detection - convert Mbps to Bps (bits per second to bytes per second)
 	if bandwidthMbps := viper.GetInt("resources.bandwidth_mbps"); bandwidthMbps > 0 {
-		resources.BandwidthMbps = bandwidthMbps
+		resources.BandwidthBps = int64(bandwidthMbps) * 1000000 / 8
 	} else {
-		// Default to 100Mbps for now, would use network speed test in production
-		resources.BandwidthMbps = 100
+		// Default to 100Mbps = 12.5 MBps
+		resources.BandwidthBps = int64(100) * 1000000 / 8
+	}
+
+	// GPU detection
+	if gpuCount := viper.GetInt("resources.gpu_count"); gpuCount > 0 {
+		resources.GPU = int32(gpuCount)
+	} else {
+		resources.GPU = 0
 	}
 
 	logger.Info("Detected resources",
-		zap.Int("cpu_cores", resources.CPUCores),
-		zap.Int("memory_mb", resources.MemoryMB),
-		zap.Int("storage_gb", resources.StorageGB),
-		zap.Int("bandwidth_mbps", resources.BandwidthMbps),
+		zap.Int64("cpu_millicores", resources.CPUMillicores),
+		zap.Int64("memory_bytes", resources.MemoryBytes),
+		zap.Int64("storage_bytes", resources.StorageBytes),
+		zap.Int64("bandwidth_bps", resources.BandwidthBps),
+		zap.Int32("gpu_count", resources.GPU),
 	)
 
 	return resources
@@ -387,10 +400,11 @@ func inspect(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Architecture: %s\n", runtime.GOARCH)
 	fmt.Printf("Go Version: %s\n", runtime.Version())
 	fmt.Println("\nDetected Resources:")
-	fmt.Printf("  CPU Cores: %d\n", resources.CPUCores)
-	fmt.Printf("  Memory: %d MB\n", resources.MemoryMB)
-	fmt.Printf("  Storage: %d GB\n", resources.StorageGB)
-	fmt.Printf("  Bandwidth: %d Mbps\n", resources.BandwidthMbps)
+	fmt.Printf("  CPU Millicores: %d (%.1f cores)\n", resources.CPUMillicores, float64(resources.CPUMillicores)/1000.0)
+	fmt.Printf("  Memory: %d MB\n", resources.MemoryBytes/(1024*1024))
+	fmt.Printf("  Storage: %d GB\n", resources.StorageBytes/(1024*1024*1024))
+	fmt.Printf("  Bandwidth: %.1f Mbps\n", float64(resources.BandwidthBps)*8/1000000.0)
+	fmt.Printf("  GPU Count: %d\n", resources.GPU)
 
 	// Check container runtime
 	fmt.Println("\nContainer Runtime:")

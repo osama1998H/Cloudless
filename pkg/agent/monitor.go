@@ -263,6 +263,7 @@ type ResourceUsage struct {
 	MemoryBytes   int64
 	StorageBytes  int64
 	BandwidthBPS  int64
+	GPU           int32
 }
 
 // CheckThresholds checks if resource usage exceeds thresholds

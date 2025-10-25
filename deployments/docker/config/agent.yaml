@@ -1,0 +1,58 @@
+# Cloudless Agent Configuration
+
+# Agent settings
+agent:
+  bind_address: "0.0.0.0:8090"
+  data_dir: "/data"
+
+# Coordinator connection
+coordinator:
+  address: "coordinator:8080"
+  reconnect_interval: "10s"
+  heartbeat_interval: "30s"
+
+# TLS/mTLS settings
+# Paths are set via environment variables (CLOUDLESS_TLS_CERT, CLOUDLESS_TLS_KEY, CLOUDLESS_TLS_CA)
+tls:
+  enabled: true
+  skip_verify: false
+
+# Container runtime settings
+runtime:
+  type: "containerd"
+  socket: "/run/containerd/containerd.sock"
+  namespace: "cloudless"
+
+  # Runtime limits
+  max_containers: 100
+  default_cpu_shares: 1024
+  default_memory_limit: 536870912  # 512MB
+
+# Resource monitoring
+monitoring:
+  interval: "5s"
+  disk_path: "/"
+
+  # Alert thresholds
+  thresholds:
+    cpu_percent: 80.0
+    memory_percent: 85.0
+    disk_percent: 90.0
+
+# Storage settings
+storage:
+  data_dir: "/data/storage"
+  max_volume_size: 107374182400  # 100GB
+  default_volume_size: 10737418240  # 10GB
+
+# Networking
+networking:
+  overlay_enabled: true
+  bridge_name: "cloudless0"
+  subnet: "10.244.0.0/16"
+
+# Logging
+logging:
+  level: "debug"
+  format: "json"
+  output: "stdout"

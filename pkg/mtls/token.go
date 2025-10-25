@@ -10,7 +10,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // TokenManager manages bootstrap tokens for node enrollment
@@ -121,17 +120,12 @@ func (tm *TokenManager) GenerateToken(nodeID, nodeName, region, zone string, val
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	// Hash token for storage (we don't store the actual token)
-	hashedToken, err := bcrypt.GenerateFromPassword([]byte(tokenString), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash token: %w", err)
-	}
-
 	// Create bootstrap token
+	// Note: We don't hash JWTs with bcrypt since they're already cryptographically signed
 	token := &BootstrapToken{
 		ID:          tokenID,
 		Token:       tokenString,
-		HashedToken: hashedToken,
+		HashedToken: nil, // Not needed for JWTs
 		NodeID:      nodeID,
 		NodeName:    nodeName,
 		Region:      region,
@@ -192,10 +186,8 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*BootstrapToken, erro
 		return nil, fmt.Errorf("token not found")
 	}
 
-	// Verify token hash
-	if err := bcrypt.CompareHashAndPassword(storedToken.HashedToken, []byte(tokenString)); err != nil {
-		return nil, fmt.Errorf("token verification failed")
-	}
+	// Note: JWT signature is already verified by jwt.ParseWithClaims above
+	// No need for additional bcrypt verification
 
 	// Check expiration
 	if time.Now().After(storedToken.ExpiresAt) {

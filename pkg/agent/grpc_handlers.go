@@ -147,20 +147,12 @@ func (a *Agent) RunContainer(ctx context.Context, req *api.RunContainerRequest) 
 func (a *Agent) StopContainer(ctx context.Context, req *api.StopContainerRequest) (*emptypb.Empty, error) {
 	a.logger.Info("Stopping container",
 		zap.String("container_id", req.ContainerId),
-		zap.Bool("force", req.Force),
 	)
 
-	// Determine timeout
+	// Determine timeout from grace period
 	timeout := 30 * time.Second
-	if req.Timeout != nil {
-		timeout = req.Timeout.AsDuration()
-	}
-
-	// Stop the container
-	// Note: Force and regular stop both use StopContainer
-	// If force is true, we use a very short timeout
-	if req.Force {
-		timeout = 1 * time.Second
+	if req.GracePeriod != nil {
+		timeout = req.GracePeriod.AsDuration()
 	}
 
 	if err := a.runtime.StopContainer(ctx, req.ContainerId, timeout); err != nil {
@@ -194,38 +186,34 @@ func (a *Agent) GetContainerStatus(ctx context.Context, req *api.GetContainerSta
 		return nil, fmt.Errorf("failed to get container status: %w", err)
 	}
 
-	// Get container stats if requested
-	var stats *api.ResourceUsage
-	if req.IncludeStats {
-		containerStats, err := a.runtime.GetContainerStats(ctx, req.ContainerId)
-		if err != nil {
-			a.logger.Warn("Failed to get container stats",
-				zap.String("container_id", req.ContainerId),
-				zap.Error(err),
-			)
-			// Continue without stats rather than failing the entire request
-		} else {
-			// Calculate bandwidth from network stats (total bytes per second approximation)
-			bandwidthBps := int64(containerStats.NetworkStats.RxBytes + containerStats.NetworkStats.TxBytes)
+	// Get container stats
+	var usage *api.ResourceUsage
+	containerStats, err := a.runtime.GetContainerStats(ctx, req.ContainerId)
+	if err != nil {
+		a.logger.Warn("Failed to get container stats",
+			zap.String("container_id", req.ContainerId),
+			zap.Error(err),
+		)
+		// Continue without stats rather than failing the entire request
+	} else {
+		// Calculate bandwidth from network stats (total bytes per second approximation)
+		bandwidthBps := int64(containerStats.NetworkStats.RxBytes + containerStats.NetworkStats.TxBytes)
 
-			stats = &api.ResourceUsage{
-				CpuMillicores: int32(containerStats.CPUStats.UsageNanoseconds / 1000000), // Convert nanoseconds to millicores (approximate)
-				MemoryBytes:   int64(containerStats.MemoryStats.UsageBytes),
-				StorageBytes:  int64(containerStats.StorageStats.UsageBytes),
-				BandwidthBps:  bandwidthBps,
-				GpuCount:      containerStats.GPUStats.DeviceCount,
-			}
+		usage = &api.ResourceUsage{
+			CpuMillicores: int64(containerStats.CPUStats.UsageNanoseconds / 1000000), // Convert nanoseconds to millicores (approximate)
+			MemoryBytes:   int64(containerStats.MemoryStats.UsageBytes),
+			StorageBytes:  int64(containerStats.StorageStats.UsageBytes),
+			BandwidthBps:  bandwidthBps,
+			GpuCount:      containerStats.GPUStats.DeviceCount,
 		}
 	}
 
 	// Convert to API response
 	status := &api.ContainerStatus{
 		ContainerId: info.ID,
-		Name:        info.Name,
 		State:       mapContainerState(info.State),
 		Image:       info.Image,
-		CreatedAt:   timestamppb.New(info.CreatedAt),
-		Stats:       stats,
+		Usage:       usage,
 	}
 
 	return status, nil
@@ -262,7 +250,7 @@ func (a *Agent) StreamLogs(req *api.StreamLogsRequest, stream grpc.ServerStreami
 
 			entry := &api.LogEntry{
 				Timestamp: timestamppb.New(logEntry.Timestamp),
-				Line:      logEntry.Message,
+				Line:      logEntry.Log,
 				Stream:    logEntry.Stream,
 			}
 
@@ -284,11 +272,17 @@ func (a *Agent) ExecCommand(ctx context.Context, req *api.ExecCommandRequest) (*
 	)
 
 	// Build exec config
+	// Convert map to slice of KEY=VALUE strings
+	envSlice := make([]string, 0, len(req.Env))
+	for k, v := range req.Env {
+		envSlice = append(envSlice, fmt.Sprintf("%s=%s", k, v))
+	}
+
 	execConfig := runtime.ExecConfig{
 		Command: req.Command,
-		Env:     req.Env,
+		Env:     envSlice,
 		Tty:     req.Tty,
-		Stdin:   req.Stdin,
+		Stdin:   false, // Not supported in proto
 		Stdout:  true,
 		Stderr:  true,
 	}
@@ -318,38 +312,43 @@ func (a *Agent) ExecCommand(ctx context.Context, req *api.ExecCommandRequest) (*
 
 // ReportResources reports current resource usage
 func (a *Agent) ReportResources(ctx context.Context, req *api.ReportResourcesRequest) (*emptypb.Empty, error) {
+	usage := req.GetUsage()
+	if usage == nil {
+		return &emptypb.Empty{}, nil
+	}
+
 	a.logger.Debug("Received resource report",
-		zap.Int32("cpu_millicores", req.CpuUsage),
-		zap.Int64("memory_bytes", req.MemoryUsage),
+		zap.Int64("cpu_millicores", usage.CpuMillicores),
+		zap.Int64("memory_bytes", usage.MemoryBytes),
 	)
 
 	// Store CPU metrics
-	a.metricsStorage.RecordMetric(MetricTypeCPU, float64(req.CpuUsage), map[string]string{
+	a.metricsStorage.RecordMetric(MetricTypeCPU, float64(usage.CpuMillicores), map[string]string{
 		"source": "coordinator",
 	})
 
 	// Store memory metrics
-	a.metricsStorage.RecordMetric(MetricTypeMemory, float64(req.MemoryUsage), map[string]string{
+	a.metricsStorage.RecordMetric(MetricTypeMemory, float64(usage.MemoryBytes), map[string]string{
 		"source": "coordinator",
 	})
 
 	// Store storage metrics if provided
-	if req.StorageUsage > 0 {
-		a.metricsStorage.RecordMetric(MetricTypeStorage, float64(req.StorageUsage), map[string]string{
+	if usage.StorageBytes > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeStorage, float64(usage.StorageBytes), map[string]string{
 			"source": "coordinator",
 		})
 	}
 
 	// Store bandwidth metrics if provided
-	if req.NetworkUsage > 0 {
-		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(req.NetworkUsage), map[string]string{
+	if usage.BandwidthBps > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(usage.BandwidthBps), map[string]string{
 			"source": "coordinator",
 		})
 	}
 
 	// Store GPU metrics if provided
-	if req.GpuUsage > 0 {
-		a.metricsStorage.RecordMetric(MetricTypeGPU, float64(req.GpuUsage), map[string]string{
+	if usage.GpuCount > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeGPU, float64(usage.GpuCount), map[string]string{
 			"source": "coordinator",
 		})
 	}
@@ -382,11 +381,21 @@ func (a *Agent) GetFragments(ctx context.Context, req *api.GetFragmentsRequest) 
 			stats = &runtime.ContainerStats{}
 		}
 
+		// Determine fragment status based on container state
+		fragmentStatus := &api.FragmentStatus{
+			State: api.FragmentStatus_ALLOCATED, // Default to allocated for running containers
+		}
+		if container.State == runtime.ContainerStateRunning {
+			fragmentStatus.State = api.FragmentStatus_ALLOCATED
+		} else if container.State == runtime.ContainerStateStopped || container.State == runtime.ContainerStateFailed {
+			fragmentStatus.State = api.FragmentStatus_RELEASING
+		}
+
 		fragment := &api.Fragment{
-			Id:    container.ID,
-			State: mapContainerState(container.State),
-			Resources: &api.ResourceUsage{
-				CpuMillicores: int32(stats.CPUStats.UsageNanoseconds / 1000000),
+			Id:     container.ID,
+			Status: fragmentStatus,
+			Resources: &api.ResourceCapacity{
+				CpuMillicores: int64(stats.CPUStats.UsageNanoseconds / 1000000),
 				MemoryBytes:   int64(stats.MemoryStats.UsageBytes),
 			},
 			CreatedAt: timestamppb.New(container.CreatedAt),
@@ -415,20 +424,9 @@ func (a *Agent) GetFragments(ctx context.Context, req *api.GetFragmentsRequest) 
 	}, nil
 }
 
-// mapContainerState converts runtime container state to API state
-func mapContainerState(state string) api.ContainerStatus_State {
-	switch state {
-	case "running":
-		return api.ContainerStatus_RUNNING
-	case "stopped", "exited":
-		return api.ContainerStatus_STOPPED
-	case "paused":
-		return api.ContainerStatus_PAUSED
-	case "restarting":
-		return api.ContainerStatus_RESTARTING
-	case "created":
-		return api.ContainerStatus_CREATED
-	default:
-		return api.ContainerStatus_UNKNOWN
-	}
+// mapContainerState converts runtime container state to API state string
+func mapContainerState(state runtime.ContainerState) string {
+	// ContainerState is already a string type in runtime package
+	// Just convert it to string
+	return string(state)
 }
