@@ -1,0 +1,80 @@
+# WARNING: Development configuration only - auth_enabled must be true for production
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+# By default, Loki will send anonymous, but uniquely-identifiable usage and configuration
+# analytics to Grafana Labs. These statistics are sent to https://stats.grafana.org/
+#
+# Statistics help us better understand how Loki is used, and they show us performance
+# levels for most users. This helps us prioritize features and documentation.
+# For more information on what's sent, look at
+# https://github.com/grafana/loki/blob/main/pkg/usagestats/stats.go
+# Refer to the buildReport method to see what goes into a report.
+#
+# If you would like to disable reporting, uncomment the following lines:
+analytics:
+  reporting_enabled: false
+
+limits_config:
+  # Enable log volume for Grafana visualization
+  volume_enabled: true
+  # Retention period (7 days)
+  retention_period: 168h
+  # Max query lookback (30 days)
+  max_query_lookback: 720h
+  # Allow larger queries for development
+  max_query_length: 721h
+  max_entries_limit_per_query: 10000
+  # Development only - unlimited streams. Set reasonable limits for production (e.g., 10000)
+  max_streams_per_user: 0
+  max_global_streams_per_user: 0
+
+chunk_store_config:
+  max_look_back_period: 0s
+
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 168h
+
+compactor:
+  working_directory: /loki/compactor
+  shared_store: filesystem
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
