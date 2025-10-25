@@ -1,0 +1,278 @@
+# golangci-lint configuration for Cloudless Platform
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Which dirs to skip
+  skip-dirs:
+    - test/fixtures
+    - vendor
+    - third_party
+
+  # Which files to skip
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.pb\\.gw\\.go$"
+
+  # Go version
+  go: '1.23'
+
+output:
+  # Format: colored-line-number, line-number, json, tab, checkstyle, code-climate
+  format: colored-line-number
+
+  # Sort results
+  sort-results: true
+
+linters:
+  enable:
+    # Default linters
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+
+    # Additional linters for code quality
+    - bodyclose
+    - contextcheck
+    - decorder
+    - dupl
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - exportloopref
+    - gci
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gofmt
+    - gofumpt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - ifshort
+    - lll
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - stylecheck
+    - tagliatelle
+    - tenv
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - wastedassign
+    - whitespace
+
+  disable:
+    # Disabled as they are too strict or not relevant
+    - exhaustivestruct
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - goerr113
+    - golint
+    - interfacer
+    - maligned
+    - scopelint
+    - wrapcheck
+    - wsl
+
+linters-settings:
+  dupl:
+    threshold: 100
+
+  errorlint:
+    errorf: true
+
+  exhaustive:
+    check-generated: false
+    default-signifies-exhaustive: false
+
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/cloudless/cloudless)
+
+  gocognit:
+    min-complexity: 30
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+
+  gocyclo:
+    min-complexity: 15
+
+  gofumpt:
+    lang-version: "1.23"
+    extra-rules: true
+
+  gomnd:
+    settings:
+      mnd:
+        checks:
+          - argument
+          - case
+          - condition
+          - operation
+          - return
+          - assign
+        ignored-functions:
+          - 'time.Duration'
+
+  govet:
+    check-shadowing: true
+
+  lll:
+    line-length: 120
+
+  misspell:
+    locale: US
+
+  nakedret:
+    max-func-lines: 30
+
+  nestif:
+    min-complexity: 4
+
+  nolintlint:
+    allow-unused: false
+    allow-leading-space: false
+    require-explanation: true
+    require-specific: true
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+
+  stylecheck:
+    go: "1.23"
+    checks: ["all", "-ST1000", "-ST1003"]
+
+  tagliatelle:
+    case:
+      rules:
+        json: snake
+        yaml: camel
+        xml: camel
+
+  unparam:
+    check-exported: false
+
+issues:
+  # List of regexps of issue texts to exclude
+  exclude:
+    - 'declaration of "err" shadows declaration at'
+    - 'should have a package comment, unless it'
+
+  # Exclude rules for test files
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - gocognit
+        - gocyclo
+        - goconst
+        - gosec
+        - errcheck
+
+    - path: test/
+      linters:
+        - gosec
+        - errcheck
+
+    # Exclude lll for long lines with URLs
+    - source: "https://"
+      linters:
+        - lll
+
+    # Exclude certain linters for generated files
+    - path: \.(pb|pb\.gw)\.go$
+      linters:
+        - goimports
+        - gofumpt
+        - gci
+        - gocritic
+        - golint
+        - stylecheck
+
+  # Maximum issues count per one linter
+  max-issues-per-linter: 50
+
+  # Maximum count of issues with the same text
+  max-same-issues: 3
+
+  # Fix found issues (if it's supported by the linter)
+  fix: false
+
+severity:
+  # Set the default severity for issues
+  default-severity: error
+
+  # Rules to determine the severity
+  rules:
+    - linters:
+        - dupl
+      severity: warning
+    - linters:
+        - gomnd
+      severity: warning

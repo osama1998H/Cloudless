@@ -1,0 +1,202 @@
+version: '3.8'
+
+networks:
+  cloudless:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+services:
+  # Coordinator node (acts as VPS anchor)
+  coordinator:
+    image: cloudless/coordinator:${VERSION:-latest}
+    container_name: cloudless-coordinator
+    hostname: coordinator
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.10
+    ports:
+      - "8080:8080"  # gRPC API
+      - "8081:8081"  # HTTP API Gateway
+      - "9090:9090"  # Metrics (Prometheus)
+      - "3000:3000"  # RAFT consensus
+    environment:
+      - CLOUDLESS_LOG_LEVEL=debug
+      - CLOUDLESS_NODE_ID=coordinator-1
+      - CLOUDLESS_BIND_ADDR=0.0.0.0:8080
+      - CLOUDLESS_RAFT_ADDR=172.20.0.10:3000
+      - CLOUDLESS_METRICS_ADDR=0.0.0.0:9090
+      - CLOUDLESS_DATA_DIR=/data
+      - CLOUDLESS_BOOTSTRAP=true
+    volumes:
+      - coordinator-data:/data
+      - ./config/coordinator.yaml:/etc/cloudless/coordinator.yaml:ro
+      - ./certs:/etc/cloudless/certs:ro
+    command: ["--config", "/etc/cloudless/coordinator.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Agent nodes (simulate multiple devices)
+  agent-1:
+    image: cloudless/agent:${VERSION:-latest}
+    container_name: cloudless-agent-1
+    hostname: agent-1
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.21
+    environment:
+      - CLOUDLESS_LOG_LEVEL=debug
+      - CLOUDLESS_NODE_ID=agent-1
+      - CLOUDLESS_COORDINATOR_ADDR=coordinator:8080
+      - CLOUDLESS_AGENT_ADDR=0.0.0.0:8090
+      - CLOUDLESS_DATA_DIR=/data
+      - CLOUDLESS_REGION=local
+      - CLOUDLESS_ZONE=zone-a
+      - CLOUDLESS_CPU_CORES=2
+      - CLOUDLESS_MEMORY_MB=2048
+      - CLOUDLESS_STORAGE_GB=10
+      - CLOUDLESS_BANDWIDTH_MBPS=100
+    volumes:
+      - agent1-data:/data
+      - ./config/agent.yaml:/etc/cloudless/agent.yaml:ro
+      - ./certs:/etc/cloudless/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For containerd access
+    command: ["--config", "/etc/cloudless/agent.yaml"]
+    depends_on:
+      - coordinator
+    restart: unless-stopped
+    privileged: true  # Required for container runtime
+
+  agent-2:
+    image: cloudless/agent:${VERSION:-latest}
+    container_name: cloudless-agent-2
+    hostname: agent-2
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.22
+    environment:
+      - CLOUDLESS_LOG_LEVEL=debug
+      - CLOUDLESS_NODE_ID=agent-2
+      - CLOUDLESS_COORDINATOR_ADDR=coordinator:8080
+      - CLOUDLESS_AGENT_ADDR=0.0.0.0:8090
+      - CLOUDLESS_DATA_DIR=/data
+      - CLOUDLESS_REGION=local
+      - CLOUDLESS_ZONE=zone-b
+      - CLOUDLESS_CPU_CORES=4
+      - CLOUDLESS_MEMORY_MB=4096
+      - CLOUDLESS_STORAGE_GB=20
+      - CLOUDLESS_BANDWIDTH_MBPS=200
+    volumes:
+      - agent2-data:/data
+      - ./config/agent.yaml:/etc/cloudless/agent.yaml:ro
+      - ./certs:/etc/cloudless/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--config", "/etc/cloudless/agent.yaml"]
+    depends_on:
+      - coordinator
+    restart: unless-stopped
+    privileged: true
+
+  agent-3:
+    image: cloudless/agent:${VERSION:-latest}
+    container_name: cloudless-agent-3
+    hostname: agent-3
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.23
+    environment:
+      - CLOUDLESS_LOG_LEVEL=debug
+      - CLOUDLESS_NODE_ID=agent-3
+      - CLOUDLESS_COORDINATOR_ADDR=coordinator:8080
+      - CLOUDLESS_AGENT_ADDR=0.0.0.0:8090
+      - CLOUDLESS_DATA_DIR=/data
+      - CLOUDLESS_REGION=local
+      - CLOUDLESS_ZONE=zone-a
+      - CLOUDLESS_CPU_CORES=1
+      - CLOUDLESS_MEMORY_MB=1024
+      - CLOUDLESS_STORAGE_GB=5
+      - CLOUDLESS_BANDWIDTH_MBPS=50
+      - CLOUDLESS_NODE_TYPE=edge  # Simulate edge device
+    volumes:
+      - agent3-data:/data
+      - ./config/agent.yaml:/etc/cloudless/agent.yaml:ro
+      - ./certs:/etc/cloudless/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--config", "/etc/cloudless/agent.yaml"]
+    depends_on:
+      - coordinator
+    restart: unless-stopped
+    privileged: true
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cloudless-prometheus
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.30
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - coordinator
+    restart: unless-stopped
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cloudless-grafana
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.31
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Jaeger for distributed tracing (optional)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: cloudless-jaeger
+    networks:
+      cloudless:
+        ipv4_address: 172.20.0.32
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"  # UI
+      - "14268:14268"
+      - "14250:14250"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    restart: unless-stopped
+
+volumes:
+  coordinator-data:
+  agent1-data:
+  agent2-data:
+  agent3-data:
+  prometheus-data:
+  grafana-data:

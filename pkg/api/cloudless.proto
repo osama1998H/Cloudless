@@ -1,0 +1,543 @@
+syntax = "proto3";
+
+package cloudless.api.v1;
+
+option go_package = "github.com/cloudless/cloudless/pkg/api;api";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+// ============================================================================
+// Core Services
+// ============================================================================
+
+// CoordinatorService handles control plane operations
+service CoordinatorService {
+  // Node management
+  rpc EnrollNode(EnrollNodeRequest) returns (EnrollNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc GetNode(GetNodeRequest) returns (Node);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc DrainNode(DrainNodeRequest) returns (google.protobuf.Empty);
+  rpc UncordonNode(UncordonNodeRequest) returns (google.protobuf.Empty);
+
+  // Workload management
+  rpc CreateWorkload(CreateWorkloadRequest) returns (Workload);
+  rpc UpdateWorkload(UpdateWorkloadRequest) returns (Workload);
+  rpc DeleteWorkload(DeleteWorkloadRequest) returns (google.protobuf.Empty);
+  rpc GetWorkload(GetWorkloadRequest) returns (Workload);
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
+  rpc ScaleWorkload(ScaleWorkloadRequest) returns (Workload);
+
+  // Scheduling
+  rpc Schedule(ScheduleRequest) returns (ScheduleResponse);
+  rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
+}
+
+// AgentService handles node-local operations
+service AgentService {
+  // Container operations
+  rpc RunContainer(RunContainerRequest) returns (RunContainerResponse);
+  rpc StopContainer(StopContainerRequest) returns (google.protobuf.Empty);
+  rpc GetContainerStatus(GetContainerStatusRequest) returns (ContainerStatus);
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogEntry);
+  rpc ExecCommand(ExecCommandRequest) returns (ExecCommandResponse);
+
+  // Resource reporting
+  rpc ReportResources(ReportResourcesRequest) returns (google.protobuf.Empty);
+  rpc GetFragments(GetFragmentsRequest) returns (GetFragmentsResponse);
+}
+
+// ============================================================================
+// Common Messages
+// ============================================================================
+
+// Node represents a device in the cluster
+message Node {
+  string id = 1;
+  string name = 2;
+  string region = 3;
+  string zone = 4;
+  NodeCapabilities capabilities = 5;
+  ResourceCapacity capacity = 6;
+  ResourceUsage usage = 7;
+  NodeStatus status = 8;
+  double reliability_score = 9;
+  google.protobuf.Timestamp last_seen = 10;
+  map<string, string> labels = 11;
+  repeated Taint taints = 12;
+}
+
+// NodeCapabilities describes what a node can do
+message NodeCapabilities {
+  repeated string container_runtimes = 1;
+  bool supports_gpu = 2;
+  bool supports_arm = 3;
+  bool supports_x86 = 4;
+  repeated string network_features = 5;
+  repeated string storage_classes = 6;
+}
+
+// ResourceCapacity represents total resources
+message ResourceCapacity {
+  int64 cpu_millicores = 1;
+  int64 memory_bytes = 2;
+  int64 storage_bytes = 3;
+  int64 bandwidth_bps = 4;
+  int32 gpu_count = 5;
+}
+
+// ResourceUsage represents current resource usage
+message ResourceUsage {
+  int64 cpu_millicores = 1;
+  int64 memory_bytes = 2;
+  int64 storage_bytes = 3;
+  int64 bandwidth_bps = 4;
+  int32 gpu_count = 5;
+}
+
+// NodeStatus represents the current state of a node
+message NodeStatus {
+  enum Phase {
+    UNKNOWN = 0;
+    ENROLLING = 1;
+    READY = 2;
+    DRAINING = 3;
+    CORDONED = 4;
+    OFFLINE = 5;
+    FAILED = 6;
+  }
+
+  Phase phase = 1;
+  string message = 2;
+  google.protobuf.Timestamp last_transition = 3;
+  repeated NodeCondition conditions = 4;
+}
+
+// NodeCondition represents a condition of a node
+message NodeCondition {
+  string type = 1;  // Ready, MemoryPressure, DiskPressure, NetworkUnavailable
+  string status = 2;  // True, False, Unknown
+  string reason = 3;
+  string message = 4;
+  google.protobuf.Timestamp last_transition = 5;
+}
+
+// Taint marks a node as having something that workloads must tolerate
+message Taint {
+  string key = 1;
+  string value = 2;
+  string effect = 3;  // NoSchedule, PreferNoSchedule, NoExecute
+}
+
+// Fragment represents a slice of resources
+message Fragment {
+  string id = 1;
+  string node_id = 2;
+  ResourceCapacity resources = 3;
+  string workload_id = 4;
+  FragmentStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// FragmentStatus represents the state of a fragment
+message FragmentStatus {
+  enum State {
+    UNKNOWN = 0;
+    AVAILABLE = 1;
+    RESERVED = 2;
+    ALLOCATED = 3;
+    RELEASING = 4;
+  }
+
+  State state = 1;
+  string message = 2;
+}
+
+// Workload represents a deployed application
+message Workload {
+  string id = 1;
+  string name = 2;
+  string namespace = 3;
+  WorkloadSpec spec = 4;
+  WorkloadStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  map<string, string> labels = 8;
+  map<string, string> annotations = 9;
+}
+
+// WorkloadSpec defines desired workload state
+message WorkloadSpec {
+  string image = 1;
+  repeated string command = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  ResourceRequirements resources = 5;
+  int32 replicas = 6;
+  PlacementPolicy placement = 7;
+  RestartPolicy restart_policy = 8;
+  RolloutStrategy rollout = 9;
+  repeated Volume volumes = 10;
+  repeated Port ports = 11;
+  HealthCheck liveness_probe = 12;
+  HealthCheck readiness_probe = 13;
+  repeated string image_pull_secrets = 14;
+}
+
+// ResourceRequirements defines resource needs
+message ResourceRequirements {
+  ResourceCapacity requests = 1;
+  ResourceCapacity limits = 2;
+}
+
+// PlacementPolicy controls where workloads run
+message PlacementPolicy {
+  repeated string regions = 1;
+  repeated string zones = 2;
+  map<string, string> node_selector = 3;
+  repeated Affinity affinity = 4;
+  repeated Affinity anti_affinity = 5;
+  repeated Toleration tolerations = 6;
+  string spread_topology = 7;  // zone, region, node
+}
+
+// Affinity rules for placement
+message Affinity {
+  enum Type {
+    NODE = 0;
+    WORKLOAD = 1;
+  }
+
+  Type type = 1;
+  map<string, string> match_labels = 2;
+  string topology_key = 3;
+  bool required = 4;
+}
+
+// Toleration allows workload on tainted nodes
+message Toleration {
+  string key = 1;
+  string value = 2;
+  string operator = 3;  // Equal, Exists
+  string effect = 4;
+}
+
+// RestartPolicy defines restart behavior
+message RestartPolicy {
+  enum Policy {
+    ALWAYS = 0;
+    ON_FAILURE = 1;
+    NEVER = 2;
+  }
+
+  Policy policy = 1;
+  int32 max_retries = 2;
+  google.protobuf.Duration backoff = 3;
+}
+
+// RolloutStrategy controls updates
+message RolloutStrategy {
+  enum Strategy {
+    ROLLING_UPDATE = 0;
+    RECREATE = 1;
+    BLUE_GREEN = 2;
+  }
+
+  Strategy strategy = 1;
+  int32 max_surge = 2;
+  int32 max_unavailable = 3;
+  google.protobuf.Duration pause_duration = 4;
+}
+
+// Volume represents storage
+message Volume {
+  string name = 1;
+  string source = 2;  // hostPath, emptyDir, configMap, secret
+  string mount_path = 3;
+  bool read_only = 4;
+  map<string, string> options = 5;
+}
+
+// Port represents network port
+message Port {
+  string name = 1;
+  int32 container_port = 2;
+  int32 host_port = 3;
+  string protocol = 4;  // TCP, UDP
+}
+
+// HealthCheck defines health probing
+message HealthCheck {
+  oneof check {
+    ExecProbe exec = 1;
+    HTTPProbe http = 2;
+    TCPProbe tcp = 3;
+  }
+
+  google.protobuf.Duration initial_delay = 4;
+  google.protobuf.Duration period = 5;
+  google.protobuf.Duration timeout = 6;
+  int32 success_threshold = 7;
+  int32 failure_threshold = 8;
+}
+
+message ExecProbe {
+  repeated string command = 1;
+}
+
+message HTTPProbe {
+  string path = 1;
+  int32 port = 2;
+  string scheme = 3;  // HTTP, HTTPS
+  repeated HTTPHeader headers = 4;
+}
+
+message HTTPHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message TCPProbe {
+  int32 port = 1;
+}
+
+// WorkloadStatus represents current workload state
+message WorkloadStatus {
+  enum Phase {
+    UNKNOWN = 0;
+    PENDING = 1;
+    SCHEDULING = 2;
+    RUNNING = 3;
+    UPDATING = 4;
+    FAILED = 5;
+    SUCCEEDED = 6;
+    TERMINATING = 7;
+  }
+
+  Phase phase = 1;
+  string message = 2;
+  int32 ready_replicas = 3;
+  int32 current_replicas = 4;
+  int32 desired_replicas = 5;
+  repeated ReplicaStatus replicas = 6;
+  google.protobuf.Timestamp last_transition = 7;
+}
+
+// ReplicaStatus represents a single replica
+message ReplicaStatus {
+  string id = 1;
+  string node_id = 2;
+  string container_id = 3;
+  string state = 4;
+  google.protobuf.Timestamp started_at = 5;
+  int32 restart_count = 6;
+}
+
+// ============================================================================
+// Request/Response Messages
+// ============================================================================
+
+// Node Management
+message EnrollNodeRequest {
+  string token = 1;
+  string node_name = 2;
+  string region = 3;
+  string zone = 4;
+  NodeCapabilities capabilities = 5;
+  ResourceCapacity capacity = 6;
+  map<string, string> labels = 7;
+}
+
+message EnrollNodeResponse {
+  string node_id = 1;
+  bytes certificate = 2;
+  bytes ca_certificate = 3;
+  google.protobuf.Duration heartbeat_interval = 4;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  ResourceUsage usage = 2;
+  repeated FragmentStatus fragments = 3;
+  repeated ContainerStatus containers = 4;
+}
+
+message HeartbeatResponse {
+  repeated WorkloadAssignment assignments = 1;
+  repeated string containers_to_stop = 2;
+  google.protobuf.Duration next_heartbeat = 3;
+}
+
+message WorkloadAssignment {
+  string fragment_id = 1;
+  Workload workload = 2;
+  string action = 3;  // run, update, stop
+}
+
+message GetNodeRequest {
+  string node_id = 1;
+}
+
+message ListNodesRequest {
+  map<string, string> label_selector = 1;
+  repeated string regions = 2;
+  repeated string zones = 3;
+  int32 limit = 4;
+  string continue_token = 5;
+}
+
+message ListNodesResponse {
+  repeated Node nodes = 1;
+  string next_token = 2;
+}
+
+message DrainNodeRequest {
+  string node_id = 1;
+  bool graceful = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+message UncordonNodeRequest {
+  string node_id = 1;
+}
+
+// Workload Management
+message CreateWorkloadRequest {
+  Workload workload = 1;
+}
+
+message UpdateWorkloadRequest {
+  Workload workload = 1;
+  repeated string update_mask = 2;
+}
+
+message DeleteWorkloadRequest {
+  string workload_id = 1;
+  bool graceful = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+message GetWorkloadRequest {
+  string workload_id = 1;
+}
+
+message ListWorkloadsRequest {
+  string namespace = 1;
+  map<string, string> label_selector = 2;
+  int32 limit = 3;
+  string continue_token = 4;
+}
+
+message ListWorkloadsResponse {
+  repeated Workload workloads = 1;
+  string next_token = 2;
+}
+
+message ScaleWorkloadRequest {
+  string workload_id = 1;
+  int32 replicas = 2;
+}
+
+// Scheduling
+message ScheduleRequest {
+  Workload workload = 1;
+  bool dry_run = 2;
+}
+
+message ScheduleResponse {
+  repeated ScheduleDecision decisions = 1;
+  string reason = 2;
+}
+
+message ScheduleDecision {
+  string replica_id = 1;
+  string node_id = 2;
+  string fragment_id = 3;
+  double score = 4;
+}
+
+message RescheduleRequest {
+  string workload_id = 1;
+  string reason = 2;
+}
+
+message RescheduleResponse {
+  repeated ScheduleDecision old_decisions = 1;
+  repeated ScheduleDecision new_decisions = 2;
+}
+
+// Container Operations
+message RunContainerRequest {
+  string fragment_id = 1;
+  Workload workload = 2;
+  string replica_id = 3;
+}
+
+message RunContainerResponse {
+  string container_id = 1;
+  string status = 2;
+}
+
+message StopContainerRequest {
+  string container_id = 1;
+  google.protobuf.Duration grace_period = 2;
+}
+
+message GetContainerStatusRequest {
+  string container_id = 1;
+}
+
+message ContainerStatus {
+  string container_id = 1;
+  string state = 2;  // created, running, paused, stopped, failed
+  string image = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp finished_at = 5;
+  int32 exit_code = 6;
+  string reason = 7;
+  ResourceUsage usage = 8;
+}
+
+message StreamLogsRequest {
+  string container_id = 1;
+  bool follow = 2;
+  int32 tail_lines = 3;
+  google.protobuf.Timestamp since = 4;
+}
+
+message LogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string stream = 2;  // stdout, stderr
+  string line = 3;
+}
+
+message ExecCommandRequest {
+  string container_id = 1;
+  repeated string command = 2;
+  map<string, string> env = 3;
+  string working_dir = 4;
+  bool tty = 5;
+}
+
+message ExecCommandResponse {
+  int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+}
+
+// Resource Reporting
+message ReportResourcesRequest {
+  string node_id = 1;
+  ResourceCapacity capacity = 2;
+  ResourceUsage usage = 3;
+}
+
+message GetFragmentsRequest {
+  string node_id = 1;
+}
+
+message GetFragmentsResponse {
+  repeated Fragment fragments = 1;
+}
