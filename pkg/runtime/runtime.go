@@ -21,6 +21,7 @@ type Runtime interface {
 	ListContainers(ctx context.Context) ([]*Container, error)
 	GetContainerLogs(ctx context.Context, containerID string, follow bool) (<-chan LogEntry, error)
 	GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)
+	ExecContainer(ctx context.Context, containerID string, config ExecConfig) (*ExecResult, error)
 
 	// Image operations
 	PullImage(ctx context.Context, image string) error

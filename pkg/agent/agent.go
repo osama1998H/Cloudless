@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/cloudless/cloudless/pkg/api"
@@ -92,6 +93,7 @@ type Agent struct {
 	// Components
 	runtime         runtime.Runtime
 	resourceMonitor *ResourceMonitor
+	metricsStorage  *MetricsStorage
 	coordinatorConn *grpc.ClientConn
 
 	// Overlay networking components
@@ -103,7 +105,9 @@ type Agent struct {
 	natTraversal    *overlay.NATTraversal
 
 	// State
-	stopCh chan struct{}
+	stopCh   chan struct{}
+	draining bool
+	mu       sync.RWMutex
 }
 
 // New creates a new agent instance
@@ -155,6 +159,43 @@ func New(config *Config) (*Agent, error) {
 	}
 	monitor := NewResourceMonitor(monitorConfig, config.Logger)
 	a.resourceMonitor = monitor
+
+	// Initialize metrics storage
+	config.Logger.Info("Initializing metrics storage")
+	metricsConfig := MetricsStorageConfig{
+		RetentionDuration: 24 * time.Hour,
+		MaxDataPoints:     1000,
+		Thresholds: map[MetricType]MetricThreshold{
+			MetricTypeCPU: {
+				WarningPercent:  70.0,
+				CriticalPercent: 90.0,
+				Limit:           float64(config.Resources.CPUMillicores),
+			},
+			MetricTypeMemory: {
+				WarningPercent:  80.0,
+				CriticalPercent: 95.0,
+				Limit:           float64(config.Resources.MemoryBytes),
+			},
+			MetricTypeStorage: {
+				WarningPercent:  85.0,
+				CriticalPercent: 95.0,
+				Limit:           float64(config.Resources.StorageBytes),
+			},
+		},
+	}
+	metricsStorage := NewMetricsStorage(metricsConfig, config.Logger)
+	a.metricsStorage = metricsStorage
+
+	// Register default alert handler
+	metricsStorage.RegisterAlertHandler(func(alert MetricsAlert) {
+		config.Logger.Warn("Resource alert triggered",
+			zap.String("type", string(alert.Type)),
+			zap.String("level", alert.Level),
+			zap.Float64("threshold", alert.Threshold),
+			zap.Float64("current", alert.Current),
+			zap.String("message", alert.Message),
+		)
+	})
 
 	// Initialize Overlay Networking Components
 	config.Logger.Info("Initializing overlay networking")
@@ -294,6 +335,12 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// Start heartbeat loop
 	go a.heartbeatLoop(ctx)
+
+	// Start metrics pruning loop
+	go a.metricsStorage.StartPruningLoop(ctx)
+
+	// Start metrics collection loop
+	go a.metricsCollectionLoop(ctx)
 
 	a.logger.Info("Agent started successfully")
 	return nil
@@ -669,71 +716,486 @@ func (a *Agent) computeNodeConditions(snapshot ResourceSnapshot) []api.NodeCondi
 func (a *Agent) processHeartbeatResponse(ctx context.Context, resp *api.HeartbeatResponse) error {
 	a.logger.Debug("Processing heartbeat response",
 		zap.Int("assignments", len(resp.Assignments)),
-		zap.Int("commands", len(resp.Commands)),
+		zap.Int("containers_to_stop", len(resp.ContainersToStop)),
 	)
 
 	// Process workload assignments
 	for _, assignment := range resp.Assignments {
-		a.logger.Info("Received workload assignment",
-			zap.String("workload_id", assignment.WorkloadID),
-			zap.String("image", assignment.Image),
-		)
+		workload := assignment.GetWorkload()
+		if workload != nil {
+			a.logger.Info("Received workload assignment",
+				zap.String("workload_id", workload.Id),
+				zap.String("fragment_id", assignment.FragmentId),
+				zap.String("action", assignment.Action),
+			)
+		}
 
-		// TODO: Start workload container
-		// This would involve:
-		// 1. Pull image if needed
-		// 2. Create container with resource constraints
-		// 3. Start container
-		// 4. Report success/failure back
 		go a.handleWorkloadAssignment(ctx, assignment)
 	}
 
-	// Process commands
-	for _, command := range resp.Commands {
-		a.logger.Info("Received command", zap.String("command", command))
+	// Process container stop commands
+	for _, containerID := range resp.ContainersToStop {
+		a.logger.Info("Received stop command",
+			zap.String("container_id", containerID),
+		)
 
-		// TODO: Execute command
-		// Commands might include:
-		// - "stop:{containerID}" - Stop a container
-		// - "update:{workloadID}" - Update a workload
-		// - "drain" - Prepare for maintenance
-		go a.handleCommand(ctx, command)
+		// Stop and delete container
+		go func(cID string) {
+			if err := a.runtime.StopContainer(ctx, cID, 30*time.Second); err != nil {
+				a.logger.Error("Failed to stop container",
+					zap.String("container_id", cID),
+					zap.Error(err),
+				)
+				return
+			}
+			if err := a.runtime.DeleteContainer(ctx, cID); err != nil {
+				a.logger.Warn("Failed to delete container",
+					zap.String("container_id", cID),
+					zap.Error(err),
+				)
+			}
+		}(containerID)
 	}
+
+	return nil
+}
+
+// metricsCollectionLoop periodically collects metrics from running containers
+func (a *Agent) metricsCollectionLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second) // Collect metrics every 30 seconds
+	defer ticker.Stop()
+
+	a.logger.Info("Starting metrics collection loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			a.logger.Info("Stopping metrics collection loop")
+			return
+		case <-a.stopCh:
+			a.logger.Info("Stopping metrics collection loop")
+			return
+		case <-ticker.C:
+			if err := a.collectAndStoreMetrics(ctx); err != nil {
+				a.logger.Error("Failed to collect metrics", zap.Error(err))
+			}
+		}
+	}
+}
+
+// collectAndStoreMetrics collects metrics from containers and stores them
+func (a *Agent) collectAndStoreMetrics(ctx context.Context) error {
+	// Get node-level resource usage
+	usage := a.resourceMonitor.GetUsage()
+	capacity := a.resourceMonitor.GetCapacity()
+
+	// Store node-level metrics
+	a.metricsStorage.RecordMetric(MetricTypeCPU, float64(usage.CPUMillicores), map[string]string{
+		"source": "node",
+		"node":   a.config.NodeID,
+	})
+
+	a.metricsStorage.RecordMetric(MetricTypeMemory, float64(usage.MemoryBytes), map[string]string{
+		"source": "node",
+		"node":   a.config.NodeID,
+	})
+
+	a.metricsStorage.RecordMetric(MetricTypeStorage, float64(usage.StorageBytes), map[string]string{
+		"source": "node",
+		"node":   a.config.NodeID,
+	})
+
+	if usage.BandwidthBps > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(usage.BandwidthBps), map[string]string{
+			"source": "node",
+			"node":   a.config.NodeID,
+		})
+	}
+
+	if capacity.GPU > 0 {
+		// GPU usage is tracked as percentage of available GPUs in use
+		a.metricsStorage.RecordMetric(MetricTypeGPU, float64(usage.GPU), map[string]string{
+			"source": "node",
+			"node":   a.config.NodeID,
+		})
+	}
+
+	// Collect per-container metrics
+	containers, err := a.runtime.ListContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	for _, container := range containers {
+		// Get container stats
+		stats, err := a.runtime.GetContainerStats(ctx, container.ID)
+		if err != nil {
+			a.logger.Warn("Failed to get container stats",
+				zap.String("container_id", container.ID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// Store container-level CPU metrics
+		cpuMillicores := stats.CPUStats.UsageNanoseconds / 1000000 // Convert to millicores
+		a.metricsStorage.RecordMetric(MetricTypeCPU, float64(cpuMillicores), map[string]string{
+			"source":       "container",
+			"container_id": container.ID,
+			"container":    container.Name,
+			"image":        container.Image,
+		})
+
+		// Store container-level memory metrics
+		a.metricsStorage.RecordMetric(MetricTypeMemory, float64(stats.MemoryStats.UsageBytes), map[string]string{
+			"source":       "container",
+			"container_id": container.ID,
+			"container":    container.Name,
+			"image":        container.Image,
+		})
+
+		// Store container-level storage metrics if available
+		if stats.StorageStats.UsageBytes > 0 {
+			a.metricsStorage.RecordMetric(MetricTypeStorage, float64(stats.StorageStats.UsageBytes), map[string]string{
+				"source":       "container",
+				"container_id": container.ID,
+				"container":    container.Name,
+				"image":        container.Image,
+			})
+		}
+
+		// Store container-level network metrics if available
+		if stats.NetworkStats.RxBytes > 0 || stats.NetworkStats.TxBytes > 0 {
+			totalBytes := stats.NetworkStats.RxBytes + stats.NetworkStats.TxBytes
+			a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(totalBytes), map[string]string{
+				"source":       "container",
+				"container_id": container.ID,
+				"container":    container.Name,
+				"image":        container.Image,
+			})
+		}
+	}
+
+	a.logger.Debug("Collected metrics",
+		zap.Int("containers", len(containers)),
+		zap.Int64("node_cpu", usage.CPUMillicores),
+		zap.Int64("node_memory", usage.MemoryBytes),
+	)
 
 	return nil
 }
 
 // handleWorkloadAssignment handles a workload assignment
 func (a *Agent) handleWorkloadAssignment(ctx context.Context, assignment *api.WorkloadAssignment) {
+	workload := assignment.GetWorkload()
+	if workload == nil {
+		a.logger.Error("Workload assignment missing workload")
+		return
+	}
+
+	spec := workload.GetSpec()
+	if spec == nil {
+		a.logger.Error("Workload assignment missing spec")
+		return
+	}
+
+	action := assignment.GetAction()
+	fragmentID := assignment.GetFragmentId()
+
 	a.logger.Info("Handling workload assignment",
-		zap.String("workload_id", assignment.WorkloadID),
-		zap.String("image", assignment.Image),
+		zap.String("workload_id", workload.Id),
+		zap.String("fragment_id", fragmentID),
+		zap.String("action", action),
+		zap.String("image", spec.Image),
 	)
 
-	// TODO: Implement workload lifecycle:
-	// 1. Pull image
-	// 2. Create container with resource limits from assignment.Resources
-	// 3. Configure networking
-	// 4. Start container
-	// 5. Monitor health
+	switch action {
+	case "run":
+		if err := a.runWorkload(ctx, workload, fragmentID); err != nil {
+			a.logger.Error("Failed to run workload",
+				zap.String("workload_id", workload.Id),
+				zap.Error(err),
+			)
+		}
+	case "update":
+		if err := a.updateWorkload(ctx, workload, fragmentID); err != nil {
+			a.logger.Error("Failed to update workload",
+				zap.String("workload_id", workload.Id),
+				zap.Error(err),
+			)
+		}
+	case "stop":
+		if err := a.stopWorkload(ctx, workload, fragmentID); err != nil {
+			a.logger.Error("Failed to stop workload",
+				zap.String("workload_id", workload.Id),
+				zap.Error(err),
+			)
+		}
+	default:
+		a.logger.Warn("Unknown workload action",
+			zap.String("action", action),
+		)
+	}
+}
 
-	// For now, just log the intent
-	a.logger.Info("Workload assignment handling not yet implemented (waiting for container runtime integration)")
+// runWorkload starts a new workload container
+func (a *Agent) runWorkload(ctx context.Context, workload *api.Workload, fragmentID string) error {
+	spec := workload.GetSpec()
+	if spec == nil {
+		return fmt.Errorf("workload spec is required")
+	}
+
+	a.logger.Info("Running workload",
+		zap.String("workload_id", workload.Id),
+		zap.String("image", spec.Image),
+	)
+
+	// Pull image
+	a.logger.Info("Pulling image", zap.String("image", spec.Image))
+	if err := a.runtime.PullImage(ctx, spec.Image); err != nil {
+		return fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	// Map volumes
+	mounts := make([]runtime.Mount, 0, len(spec.Volumes))
+	for _, vol := range spec.Volumes {
+		mounts = append(mounts, runtime.Mount{
+			Source:      vol.Source,
+			Destination: vol.MountPath,
+			Type:        "bind",
+			ReadOnly:    vol.ReadOnly,
+		})
+	}
+
+	// Map ports
+	ports := make([]runtime.PortMapping, 0, len(spec.Ports))
+	for _, port := range spec.Ports {
+		ports = append(ports, runtime.PortMapping{
+			ContainerPort: port.ContainerPort,
+			HostPort:      port.HostPort,
+			Protocol:      port.Protocol,
+		})
+	}
+
+	// Map resources
+	resources := runtime.ResourceRequirements{
+		Requests: runtime.ResourceList{
+			CPUMillicores: spec.Resources.Requests.CpuMillicores,
+			MemoryBytes:   spec.Resources.Requests.MemoryBytes,
+			StorageBytes:  spec.Resources.Requests.StorageBytes,
+		},
+		Limits: runtime.ResourceList{
+			CPUMillicores: spec.Resources.Limits.CpuMillicores,
+			MemoryBytes:   spec.Resources.Limits.MemoryBytes,
+			StorageBytes:  spec.Resources.Limits.StorageBytes,
+		},
+	}
+
+	// Map restart policy
+	restartPolicy := runtime.RestartPolicy{
+		Name:              "on-failure",
+		MaximumRetryCount: int(spec.RestartPolicy.MaxRetries),
+	}
+	if spec.RestartPolicy.Policy == 0 { // ALWAYS
+		restartPolicy.Name = "always"
+	} else if spec.RestartPolicy.Policy == 2 { // NEVER
+		restartPolicy.Name = "no"
+	}
+
+	// Create container spec
+	containerSpec := runtime.ContainerSpec{
+		ID:      fmt.Sprintf("%s-%s", workload.Id, fragmentID),
+		Image:   spec.Image,
+		Name:    fmt.Sprintf("%s-%s-%s", workload.Namespace, workload.Name, fragmentID),
+		Command: spec.Command,
+		Args:    spec.Args,
+		Env:     spec.Env,
+		Labels: map[string]string{
+			"workload.id":       workload.Id,
+			"workload.name":     workload.Name,
+			"workload.namespace": workload.Namespace,
+			"fragment.id":       fragmentID,
+		},
+		Annotations: workload.Annotations,
+		Resources:   resources,
+		Network: runtime.NetworkConfig{
+			NetworkMode: "bridge",
+			Ports:       ports,
+		},
+		Mounts:        mounts,
+		RestartPolicy: restartPolicy,
+	}
+
+	// Create container
+	container, err := a.runtime.CreateContainer(ctx, containerSpec)
+	if err != nil {
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+
+	// Start container
+	if err := a.runtime.StartContainer(ctx, container.ID); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	a.logger.Info("Workload started successfully",
+		zap.String("workload_id", workload.Id),
+		zap.String("container_id", container.ID),
+	)
+
+	return nil
+}
+
+// updateWorkload updates an existing workload container
+func (a *Agent) updateWorkload(ctx context.Context, workload *api.Workload, fragmentID string) error {
+	a.logger.Info("Updating workload",
+		zap.String("workload_id", workload.Id),
+		zap.String("fragment_id", fragmentID),
+	)
+
+	// For now, implement update as stop + start
+	// A more sophisticated implementation would do rolling updates
+	if err := a.stopWorkload(ctx, workload, fragmentID); err != nil {
+		a.logger.Warn("Failed to stop old workload during update",
+			zap.String("workload_id", workload.Id),
+			zap.Error(err),
+		)
+	}
+
+	// Wait a bit for cleanup
+	time.Sleep(2 * time.Second)
+
+	// Start new version
+	return a.runWorkload(ctx, workload, fragmentID)
+}
+
+// stopWorkload stops a workload container
+func (a *Agent) stopWorkload(ctx context.Context, workload *api.Workload, fragmentID string) error {
+	a.logger.Info("Stopping workload",
+		zap.String("workload_id", workload.Id),
+		zap.String("fragment_id", fragmentID),
+	)
+
+	// Find container by label
+	containers, err := a.runtime.ListContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	var containerID string
+	for _, container := range containers {
+		if container.Labels["workload.id"] == workload.Id &&
+		   container.Labels["fragment.id"] == fragmentID {
+			containerID = container.ID
+			break
+		}
+	}
+
+	if containerID == "" {
+		a.logger.Warn("Container not found for workload",
+			zap.String("workload_id", workload.Id),
+			zap.String("fragment_id", fragmentID),
+		)
+		return nil
+	}
+
+	// Stop container with 30 second timeout
+	if err := a.runtime.StopContainer(ctx, containerID, 30*time.Second); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Delete container
+	if err := a.runtime.DeleteContainer(ctx, containerID); err != nil {
+		a.logger.Warn("Failed to delete container",
+			zap.String("container_id", containerID),
+			zap.Error(err),
+		)
+	}
+
+	a.logger.Info("Workload stopped successfully",
+		zap.String("workload_id", workload.Id),
+		zap.String("container_id", containerID),
+	)
+
+	return nil
 }
 
 // handleCommand handles a command from the coordinator
 func (a *Agent) handleCommand(ctx context.Context, command string) {
 	a.logger.Info("Handling command", zap.String("command", command))
 
-	// TODO: Parse and execute commands
-	// Format: "action:parameter"
-	// Examples:
-	// - "stop:container-123"
-	// - "drain:graceful"
-	// - "update:workload-456"
+	// Parse command format: "action:parameter"
+	parts := strings.SplitN(command, ":", 2)
+	if len(parts) != 2 {
+		a.logger.Warn("Invalid command format", zap.String("command", command))
+		return
+	}
 
-	// For now, just log the intent
-	a.logger.Info("Command handling not yet implemented")
+	action := parts[0]
+	parameter := parts[1]
+
+	switch action {
+	case "stop":
+		// Stop a container by ID
+		a.logger.Info("Stopping container", zap.String("container_id", parameter))
+		if err := a.runtime.StopContainer(ctx, parameter, 30*time.Second); err != nil {
+			a.logger.Error("Failed to stop container",
+				zap.String("container_id", parameter),
+				zap.Error(err),
+			)
+			return
+		}
+		// Delete the container
+		if err := a.runtime.DeleteContainer(ctx, parameter); err != nil {
+			a.logger.Warn("Failed to delete container",
+				zap.String("container_id", parameter),
+				zap.Error(err),
+			)
+		}
+
+	case "drain":
+		// Drain node - stop accepting new workloads and optionally stop existing ones
+		graceful := parameter == "graceful"
+		a.logger.Info("Draining node", zap.Bool("graceful", graceful))
+
+		// Set draining flag
+		a.mu.Lock()
+		a.draining = true
+		a.mu.Unlock()
+
+		if !graceful {
+			// Stop all running containers
+			containers, err := a.runtime.ListContainers(ctx)
+			if err != nil {
+				a.logger.Error("Failed to list containers during drain", zap.Error(err))
+				return
+			}
+
+			for _, container := range containers {
+				a.logger.Info("Stopping container during drain",
+					zap.String("container_id", container.ID),
+				)
+				if err := a.runtime.StopContainer(ctx, container.ID, 30*time.Second); err != nil {
+					a.logger.Error("Failed to stop container during drain",
+						zap.String("container_id", container.ID),
+						zap.Error(err),
+					)
+				}
+			}
+		}
+
+	case "update":
+		// Update a workload - parameter is workload ID
+		a.logger.Info("Updating workload", zap.String("workload_id", parameter))
+		// This would typically trigger a rolling update
+		// For now, log that we received the command
+		a.logger.Info("Workload update command received, will be handled on next assignment")
+
+	default:
+		a.logger.Warn("Unknown command action",
+			zap.String("action", action),
+			zap.String("parameter", parameter),
+		)
+	}
 }
 
 // GetRuntime returns the container runtime

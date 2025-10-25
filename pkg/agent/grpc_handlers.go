@@ -211,11 +211,37 @@ func (a *Agent) ExecCommand(ctx context.Context, req *api.ExecCommandRequest) (*
 		zap.Strings("command", req.Command),
 	)
 
-	// TODO: Implement ExecContainer in runtime package
-	// For now, return unimplemented error
-	a.logger.Warn("ExecCommand not yet implemented in runtime")
+	// Build exec config
+	execConfig := runtime.ExecConfig{
+		Command: req.Command,
+		Env:     req.Env,
+		Tty:     req.Tty,
+		Stdin:   req.Stdin,
+		Stdout:  true,
+		Stderr:  true,
+	}
 
-	return nil, fmt.Errorf("exec command not yet implemented")
+	// Execute command in container
+	result, err := a.runtime.ExecContainer(ctx, req.ContainerId, execConfig)
+	if err != nil {
+		a.logger.Error("Failed to execute command",
+			zap.String("container_id", req.ContainerId),
+			zap.Strings("command", req.Command),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to execute command: %w", err)
+	}
+
+	a.logger.Info("Command executed successfully",
+		zap.String("container_id", req.ContainerId),
+		zap.Int("exit_code", result.ExitCode),
+	)
+
+	return &api.ExecCommandResponse{
+		ExitCode: int32(result.ExitCode),
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+	}, nil
 }
 
 // ReportResources reports current resource usage
@@ -225,12 +251,36 @@ func (a *Agent) ReportResources(ctx context.Context, req *api.ReportResourcesReq
 		zap.Int64("memory_bytes", req.MemoryUsage),
 	)
 
-	// Update internal resource tracking
-	// This allows the coordinator to push resource updates to the agent
-	// which can be used for monitoring and alerting
+	// Store CPU metrics
+	a.metricsStorage.RecordMetric(MetricTypeCPU, float64(req.CpuUsage), map[string]string{
+		"source": "coordinator",
+	})
 
-	// TODO: Store resource metrics for local monitoring/alerting
-	// TODO: Potentially trigger actions if resources exceed thresholds
+	// Store memory metrics
+	a.metricsStorage.RecordMetric(MetricTypeMemory, float64(req.MemoryUsage), map[string]string{
+		"source": "coordinator",
+	})
+
+	// Store storage metrics if provided
+	if req.StorageUsage > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeStorage, float64(req.StorageUsage), map[string]string{
+			"source": "coordinator",
+		})
+	}
+
+	// Store bandwidth metrics if provided
+	if req.NetworkUsage > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeBandwidth, float64(req.NetworkUsage), map[string]string{
+			"source": "coordinator",
+		})
+	}
+
+	// Store GPU metrics if provided
+	if req.GpuUsage > 0 {
+		a.metricsStorage.RecordMetric(MetricTypeGPU, float64(req.GpuUsage), map[string]string{
+			"source": "coordinator",
+		})
+	}
 
 	return &emptypb.Empty{}, nil
 }

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/oci"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"go.uber.org/zap"
 )
 
@@ -69,6 +71,98 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 
 	if spec.Resources.Limits.MemoryBytes > 0 {
 		specOpts = append(specOpts, oci.WithMemoryLimit(uint64(spec.Resources.Limits.MemoryBytes)))
+	}
+
+	// Storage limits (via blkio)
+	if spec.Resources.Limits.StorageBytes > 0 {
+		// Use OCI spec to set block IO weight and throttle
+		// Note: This requires cgroup v2 or blkio cgroup controller
+		specOpts = append(specOpts, func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+			if s.Linux == nil {
+				s.Linux = &specs.Linux{}
+			}
+			if s.Linux.Resources == nil {
+				s.Linux.Resources = &specs.LinuxResources{}
+			}
+			if s.Linux.Resources.BlockIO == nil {
+				s.Linux.Resources.BlockIO = &specs.LinuxBlockIO{}
+			}
+
+			// Set block IO weight (100-1000, with 500 as default)
+			weight := uint16(500)
+			s.Linux.Resources.BlockIO.Weight = &weight
+
+			// Add annotations for storage quota (to be enforced by orchestrator)
+			if c.Labels == nil {
+				c.Labels = make(map[string]string)
+			}
+			c.Labels["cloudless.storage.limit"] = fmt.Sprintf("%d", spec.Resources.Limits.StorageBytes)
+
+			return nil
+		})
+	}
+
+	// Network bandwidth limits
+	// Note: Network QoS typically requires CNI plugins or tc (traffic control)
+	// We'll add metadata that can be used by network plugins
+	if spec.Network.BandwidthBPS > 0 {
+		specOpts = append(specOpts, func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+			if c.Labels == nil {
+				c.Labels = make(map[string]string)
+			}
+			c.Labels["cloudless.network.bandwidth.limit"] = fmt.Sprintf("%d", spec.Network.BandwidthBPS)
+			return nil
+		})
+	}
+
+	// GPU device access
+	if spec.Resources.GPUCount > 0 {
+		specOpts = append(specOpts, func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+			if s.Linux == nil {
+				s.Linux = &specs.Linux{}
+			}
+			if s.Linux.Resources == nil {
+				s.Linux.Resources = &specs.LinuxResources{}
+			}
+
+			// Add GPU device access
+			// This is a simplified approach - in production, you'd use nvidia-container-runtime
+			// or AMD ROCm container runtime to properly expose GPUs
+			if s.Linux.Resources.Devices == nil {
+				s.Linux.Resources.Devices = []specs.LinuxDeviceCgroup{}
+			}
+
+			// Allow access to GPU devices
+			// /dev/nvidia* for NVIDIA GPUs
+			// /dev/dri/* for AMD/Intel GPUs
+			allow := true
+			gpuDevice := specs.LinuxDeviceCgroup{
+				Allow:  allow,
+				Type:   "c",           // character device
+				Major:  intPtr(195),   // NVIDIA major number
+				Minor:  intPtr(-1),    // All NVIDIA devices
+				Access: "rwm",         // read, write, mknod
+			}
+			s.Linux.Resources.Devices = append(s.Linux.Resources.Devices, gpuDevice)
+
+			// Also allow DRI devices for AMD/Intel
+			driDevice := specs.LinuxDeviceCgroup{
+				Allow:  allow,
+				Type:   "c",
+				Major:  intPtr(226), // DRI major number
+				Minor:  intPtr(-1),  // All DRI devices
+				Access: "rwm",
+			}
+			s.Linux.Resources.Devices = append(s.Linux.Resources.Devices, driDevice)
+
+			// Add label for GPU count
+			if c.Labels == nil {
+				c.Labels = make(map[string]string)
+			}
+			c.Labels["cloudless.gpu.count"] = fmt.Sprintf("%d", spec.Resources.GPUCount)
+
+			return nil
+		})
 	}
 
 	// Add mounts
@@ -312,4 +406,111 @@ func (r *ContainerdRuntime) containerToInfo(ctx context.Context, c containerd.Co
 	}
 
 	return container, nil
+}
+
+// intPtr returns a pointer to an int64 value
+func intPtr(i int) *int64 {
+	v := int64(i)
+	return &v
+}
+
+// ExecContainer executes a command inside a running container
+func (r *ContainerdRuntime) ExecContainer(ctx context.Context, containerID string, config ExecConfig) (*ExecResult, error) {
+	ctx = r.withNamespace(ctx)
+
+	r.logger.Info("Executing command in container",
+		zap.String("container_id", containerID),
+		zap.Strings("command", config.Command),
+	)
+
+	// Get container
+	container, err := r.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load container: %w", err)
+	}
+
+	// Get running task
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container task: %w", err)
+	}
+
+	// Check if task is running
+	status, err := task.Status(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task status: %w", err)
+	}
+	if status.Status != containerd.Running {
+		return nil, fmt.Errorf("container is not running: %s", status.Status)
+	}
+
+	// Get container spec
+	spec, err := container.Spec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container spec: %w", err)
+	}
+
+	// Build process spec
+	pspec := spec.Process
+	pspec.Args = config.Command
+
+	// Add environment variables if specified
+	if len(config.Env) > 0 {
+		pspec.Env = append(pspec.Env, config.Env...)
+	}
+
+	// Set terminal flags
+	pspec.Terminal = config.Tty
+
+	// Create exec process
+	execID := fmt.Sprintf("%s-exec-%d", containerID, time.Now().UnixNano())
+
+	// Create IO for capturing output
+	var stdout, stderr bytes.Buffer
+	ioOpts := []cio.Opt{
+		cio.WithStreams(nil, &stdout, &stderr),
+	}
+
+	process, err := task.Exec(ctx, execID, pspec, cio.NewCreator(ioOpts...))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create exec process: %w", err)
+	}
+
+	// Wait for process to start
+	if err := process.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start exec process: %w", err)
+	}
+
+	// Wait for process to complete
+	statusC, err := process.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for exec process: %w", err)
+	}
+
+	// Wait for exit
+	exitStatus := <-statusC
+
+	// Get exit code
+	exitCode := int(exitStatus.ExitCode())
+
+	// Clean up process
+	if _, err := process.Delete(ctx); err != nil {
+		r.logger.Warn("Failed to delete exec process",
+			zap.String("exec_id", execID),
+			zap.Error(err),
+		)
+	}
+
+	result := &ExecResult{
+		ExitCode: exitCode,
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
+	}
+
+	r.logger.Info("Command executed successfully",
+		zap.String("container_id", containerID),
+		zap.Int("exit_code", exitCode),
+	)
+
+	return result, nil
 }

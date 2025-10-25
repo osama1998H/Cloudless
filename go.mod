@@ -13,6 +13,7 @@ require (
 	github.com/hashicorp/raft v1.6.0
 	github.com/hashicorp/raft-boltdb/v2 v2.3.0
 	github.com/olekukonko/tablewriter v1.1.0
+	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/pion/logging v0.2.2
 	github.com/pion/stun v0.6.1
 	github.com/pion/turn/v2 v2.1.6
@@ -85,7 +86,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc2.0.20221005185240-3a7f492d3f1b // indirect
 	github.com/opencontainers/runc v1.1.5 // indirect
-	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
