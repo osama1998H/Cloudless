@@ -1,3 +1,4 @@
+# WARNING: Development configuration only - auth_enabled must be true for production
 auth_enabled: false
 
 server:
@@ -59,6 +60,7 @@ limits_config:
   # Allow larger queries for development
   max_query_length: 721h
   max_entries_limit_per_query: 10000
+  # Development only - unlimited streams. Set reasonable limits for production (e.g., 10000)
   max_streams_per_user: 0
   max_global_streams_per_user: 0
 

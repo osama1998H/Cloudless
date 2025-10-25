@@ -190,6 +190,7 @@ services:
       - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     depends_on:
       - prometheus
+      - loki
     restart: unless-stopped
 
   # Jaeger for distributed tracing (optional)
@@ -224,6 +225,11 @@ services:
       - loki-data:/loki
       - ./config/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
     command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # Promtail for log collection
@@ -236,7 +242,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./config/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - promtail-data:/var/lib/promtail
     command: -config.file=/etc/promtail/config.yml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9080/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       - loki
     restart: unless-stopped
@@ -249,3 +261,4 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  promtail-data:
