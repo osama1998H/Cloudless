@@ -1,0 +1,70 @@
+# Simple web application workload
+# Deploy a basic web server with 3 replicas
+apiVersion: cloudless.io/v1
+kind: Workload
+metadata:
+  name: simple-web
+  namespace: default
+  labels:
+    app: simple-web
+    tier: frontend
+spec:
+  # Container specification
+  image: nginx:latest
+  replicas: 3
+
+  # Resource requirements
+  resources:
+    requests:
+      cpuMillicores: 250        # 0.25 CPU
+      memoryBytes: 268435456    # 256 MiB
+      storageBytes: 1073741824  # 1 GiB
+    limits:
+      cpuMillicores: 1000       # 1 CPU
+      memoryBytes: 536870912    # 512 MiB
+
+  # Ports to expose
+  ports:
+    - name: http
+      containerPort: 80
+      protocol: TCP
+
+  # Environment variables
+  env:
+    LOG_LEVEL: info
+    ENVIRONMENT: production
+
+  # Health checks
+  livenessProbe:
+    http:
+      path: /health
+      port: 80
+      scheme: HTTP
+    initialDelay: 10s
+    period: 30s
+    timeout: 5s
+    successThreshold: 1
+    failureThreshold: 3
+
+  readinessProbe:
+    http:
+      path: /ready
+      port: 80
+    initialDelay: 5s
+    period: 10s
+    timeout: 3s
+    successThreshold: 1
+    failureThreshold: 2
+
+  # Restart policy
+  restartPolicy:
+    policy: ALWAYS
+    maxRetries: 5
+    backoff: 30s
+
+  # Rollout strategy
+  rollout:
+    strategy: ROLLING_UPDATE
+    maxSurge: 1
+    maxUnavailable: 0
+    pauseDuration: 10s

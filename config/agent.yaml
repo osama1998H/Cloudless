@@ -1,0 +1,212 @@
+# Cloudless Agent Configuration
+# The agent runs on each node and manages local resources
+
+# Agent identification
+agent:
+  # Node name (auto-generated from hostname if not specified)
+  # node_name: "node-1"
+
+  # Region and zone for placement
+  region: "us-east"
+  zone: "us-east-1a"
+
+  # Labels for node selection
+  labels:
+    environment: "production"
+    instance_type: "compute-optimized"
+    ssd: "true"
+
+# Coordinator connection
+coordinator:
+  # Coordinator address
+  address: "coordinator.cloudless.local:8443"
+
+  # Enrollment configuration
+  enrollment:
+    # Bootstrap token for initial enrollment
+    token: "CHANGE_ME_IN_PRODUCTION"
+
+    # Retry configuration
+    max_retries: 10
+    retry_interval: "30s"
+
+  # Heartbeat configuration
+  heartbeat:
+    interval: "30s"
+    timeout: "10s"
+
+# TLS/mTLS configuration
+tls:
+  # Certificate authority
+  ca_cert: "/etc/cloudless/certs/ca.crt"
+
+  # Agent certificate and key (obtained during enrollment)
+  cert_file: "/var/lib/cloudless/certs/agent.crt"
+  key_file: "/var/lib/cloudless/certs/agent.key"
+
+  # Minimum TLS version
+  min_version: "TLS13"
+
+  # Skip verification (for development only!)
+  insecure_skip_verify: false
+
+# Container runtime configuration
+runtime:
+  # Runtime type: containerd, docker
+  type: "containerd"
+
+  # Runtime socket path
+  socket: "/run/containerd/containerd.sock"
+
+  # Runtime namespace
+  namespace: "cloudless"
+
+  # Image pull configuration
+  image_pull:
+    # Image pull timeout
+    timeout: "5m"
+
+    # Concurrent image pulls
+    concurrency: 3
+
+    # Registry mirrors
+    mirrors:
+      - "https://mirror.gcr.io"
+
+# Resource management
+resources:
+  # CPU allocation (millicores, 0 = auto-detect)
+  cpu_millicores: 0
+
+  # Memory allocation (bytes, 0 = auto-detect)
+  memory_bytes: 0
+
+  # Storage allocation (bytes, 0 = auto-detect)
+  storage_bytes: 0
+
+  # Bandwidth allocation (bps, 0 = auto-detect)
+  bandwidth_bps: 0
+
+  # Resource reservation (percent to keep for system)
+  system_reserved:
+    cpu_percent: 10
+    memory_percent: 10
+    storage_percent: 10
+
+  # Enable cgroups enforcement
+  enable_cgroups: true
+
+  # cgroups version (v1 or v2)
+  cgroups_version: "v2"
+
+# Storage configuration
+storage:
+  # Data directory
+  data_dir: "/var/lib/cloudless/storage"
+
+  # Storage classes supported by this node
+  storage_classes:
+    - "hot"
+    - "cold"
+    - "ephemeral"
+
+  # IOPS class (high, medium, low)
+  iops_class: "medium"
+
+  # Enable compression
+  enable_compression: false
+
+  # Chunk size (bytes)
+  chunk_size: 4194304  # 4MB
+
+# Network configuration
+network:
+  # Enable overlay networking
+  enable_overlay: true
+
+  # QUIC listen address
+  quic_listen: "0.0.0.0:8445"
+
+  # QUIC advertise address (external address)
+  # Leave empty to auto-detect
+  quic_advertise: ""
+
+  # NAT traversal
+  nat_traversal:
+    # Enable STUN
+    enable_stun: true
+
+    # STUN servers
+    stun_servers:
+      - "stun:stun.l.google.com:19302"
+
+    # Enable TURN
+    enable_turn: true
+
+    # TURN servers
+    turn_servers:
+      - url: "turn:turn.cloudless.local:3478"
+        username: "cloudless"
+        credential: "CHANGE_ME"
+
+  # MTU size
+  mtu: 1420
+
+  # Keep-alive interval
+  keepalive_interval: "30s"
+
+# Monitoring configuration
+monitoring:
+  # Metrics collection interval
+  interval: "30s"
+
+  # Enable detailed metrics
+  detailed_metrics: true
+
+  # Metrics HTTP server
+  metrics_address: ":9091"
+
+# Observability configuration
+observability:
+  # Logging
+  log_level: "info"  # debug, info, warn, error, fatal
+  log_format: "json"  # json or console
+
+  # Metrics
+  metrics_enabled: true
+
+  # Tracing
+  tracing_enabled: false
+  tracing_endpoint: "localhost:4317"
+
+# Health configuration
+health:
+  # HTTP server for health checks
+  http_address: ":9092"
+
+  # Liveness probe configuration
+  liveness:
+    enabled: true
+    path: "/healthz"
+
+  # Readiness probe configuration
+  readiness:
+    enabled: true
+    path: "/ready"
+
+# Feature flags
+features:
+  # Enable GPU support
+  enable_gpu: false
+
+  # Enable privileged containers
+  allow_privileged: false
+
+  # Enable host networking
+  allow_host_network: false
+
+  # Enable seccomp profiles
+  enable_seccomp: true
+
+  # Seccomp profile
+  seccomp_profile: "/etc/cloudless/seccomp/default.json"

@@ -1,0 +1,149 @@
+# Cloudless Coordinator Configuration
+# The coordinator manages the control plane for the Cloudless cluster
+
+# Server configuration
+server:
+  # gRPC API server address
+  grpc_address: "0.0.0.0:8443"
+
+  # HTTP metrics and health endpoint
+  http_address: "0.0.0.0:9090"
+
+  # Node ID (auto-generated if not specified)
+  # node_id: "coordinator-1"
+
+# TLS/mTLS configuration
+tls:
+  # Certificate authority
+  ca_cert: "/etc/cloudless/certs/ca.crt"
+  ca_key: "/etc/cloudless/certs/ca.key"
+
+  # Server certificate and key
+  cert_file: "/etc/cloudless/certs/coordinator.crt"
+  key_file: "/etc/cloudless/certs/coordinator.key"
+
+  # Minimum TLS version (TLS12 or TLS13)
+  min_version: "TLS13"
+
+  # Bootstrap token for initial node enrollment
+  bootstrap_token: "CHANGE_ME_IN_PRODUCTION"
+  bootstrap_token_ttl: "24h"
+
+# RAFT consensus configuration
+raft:
+  # Data directory for RAFT logs and snapshots
+  data_dir: "/var/lib/cloudless/raft"
+
+  # Bind address for RAFT communication
+  bind_address: "0.0.0.0:8444"
+
+  # Advertise address (external address for other coordinators)
+  # Leave empty to use bind_address
+  advertise_address: ""
+
+  # Bootstrap cluster (true for first node, false for joining nodes)
+  bootstrap: true
+
+  # Heartbeat timeout
+  heartbeat_timeout: "1s"
+
+  # Election timeout
+  election_timeout: "1s"
+
+  # Snapshot interval
+  snapshot_interval: "2m"
+
+  # Snapshot threshold (number of logs before snapshot)
+  snapshot_threshold: 8192
+
+  # Trailing logs (logs to keep after snapshot)
+  trailing_logs: 10240
+
+# Scheduler configuration
+scheduler:
+  # Scheduling interval
+  interval: "5s"
+
+  # Scoring weights for placement decisions
+  scoring:
+    locality_weight: 0.3
+    reliability_weight: 0.25
+    cost_weight: 0.15
+    utilization_weight: 0.2
+    network_penalty_weight: 0.1
+
+  # Maximum scheduling retries per workload
+  max_retries: 5
+
+  # Enable bin-packing (vs spread)
+  enable_bin_packing: true
+
+# Storage configuration
+storage:
+  # Replication factor
+  replication_factor: 3
+
+  # Storage classes
+  storage_classes:
+    - name: hot
+      iops_class: high
+      replication_factor: 3
+    - name: cold
+      iops_class: low
+      replication_factor: 2
+    - name: ephemeral
+      iops_class: medium
+      replication_factor: 1
+
+  # Repair interval
+  repair_interval: "1h"
+
+  # Enable read repair
+  enable_read_repair: true
+
+  # Quorum writes
+  quorum_writes: true
+
+# Membership configuration
+membership:
+  # Heartbeat interval expected from agents
+  heartbeat_interval: "30s"
+
+  # Heartbeat timeout (mark node as offline)
+  heartbeat_timeout: "90s"
+
+  # Node cleanup interval (remove offline nodes)
+  cleanup_interval: "5m"
+
+  # Node cleanup threshold (time before removing offline nodes)
+  cleanup_threshold: "24h"
+
+# Observability configuration
+observability:
+  # Logging
+  log_level: "info"  # debug, info, warn, error, fatal
+  log_format: "json"  # json or console
+
+  # Metrics
+  metrics_enabled: true
+  metrics_address: ":9090"
+
+  # Tracing
+  tracing_enabled: false
+  tracing_endpoint: "localhost:4317"  # OTLP endpoint
+  tracing_sample_rate: 0.1
+
+  # Events
+  events_enabled: true
+  events_retention: "30d"
+
+# Feature flags
+features:
+  # Enable workload auto-scaling
+  enable_auto_scaling: false
+
+  # Enable storage erasure coding
+  enable_erasure_coding: false
+
+  # Enable GPU scheduling
+  enable_gpu_scheduling: false

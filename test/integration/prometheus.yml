@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'cloudless-test'
+    environment: 'integration'
+
+scrape_configs:
+  - job_name: 'coordinator'
+    static_configs:
+      - targets: ['coordinator:9090']
+        labels:
+          component: 'coordinator'
+
+  - job_name: 'agents'
+    static_configs:
+      - targets:
+          - 'agent1:9091'
+          - 'agent2:9091'
+          - 'agent3:9091'
+        labels:
+          component: 'agent'
+
+  - job_name: 'cloudless'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'coordinator:9090'
+          - 'agent1:9091'
+          - 'agent2:9091'
+          - 'agent3:9091'

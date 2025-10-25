@@ -31,8 +31,8 @@ help:
 ## all: Build everything
 all: clean proto build test
 
-## build: Build coordinator and agent binaries
-build: build-coordinator build-agent
+## build: Build coordinator, agent, and CLI binaries
+build: build-coordinator build-agent build-cli
 
 ## build-coordinator: Build the coordinator binary
 build-coordinator:
@@ -46,12 +46,19 @@ build-agent:
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_AGENT) ./cmd/agent
 
+## build-cli: Build the cloudlessctl CLI tool
+build-cli:
+	@echo "Building cloudlessctl..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/cloudlessctl ./cmd/cloudlessctl
+
 ## build-linux-amd64: Cross-compile for Linux AMD64
 build-linux-amd64:
 	@echo "Building for Linux AMD64..."
 	@mkdir -p $(BUILD_DIR)/linux-amd64
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/$(BINARY_NAME_COORDINATOR) ./cmd/coordinator
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/$(BINARY_NAME_AGENT) ./cmd/agent
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/cloudlessctl ./cmd/cloudlessctl
 
 ## build-linux-arm64: Cross-compile for Linux ARM64
 build-linux-arm64:
@@ -59,6 +66,7 @@ build-linux-arm64:
 	@mkdir -p $(BUILD_DIR)/linux-arm64
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(BINARY_NAME_COORDINATOR) ./cmd/coordinator
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(BINARY_NAME_AGENT) ./cmd/agent
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/cloudlessctl ./cmd/cloudlessctl
 
 ## build-all: Build for all platforms
 build-all:
@@ -73,6 +81,8 @@ build-platform:
 		-o $(BUILD_DIR)/$${GOOS}-$${GOARCH}/$(BINARY_NAME_COORDINATOR) ./cmd/coordinator
 	@CGO_ENABLED=0 GOOS=$${GOOS} GOARCH=$${GOARCH} $(GO) build $(LDFLAGS) \
 		-o $(BUILD_DIR)/$${GOOS}-$${GOARCH}/$(BINARY_NAME_AGENT) ./cmd/agent
+	@CGO_ENABLED=0 GOOS=$${GOOS} GOARCH=$${GOARCH} $(GO) build $(LDFLAGS) \
+		-o $(BUILD_DIR)/$${GOOS}-$${GOARCH}/cloudlessctl ./cmd/cloudlessctl
 
 ## clean: Clean build artifacts
 clean:
@@ -106,10 +116,37 @@ coverage: test
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
-## benchmark: Run benchmarks
+## benchmark: Run all benchmarks
 benchmark:
-	@echo "Running benchmarks..."
-	$(GOTEST) -bench=. -benchmem ./...
+	@echo "Running all benchmarks..."
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/scheduler ./pkg/storage ./pkg/observability
+
+## bench-scheduler: Run scheduler benchmarks
+bench-scheduler:
+	@echo "Running scheduler benchmarks..."
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/scheduler
+
+## bench-storage: Run storage benchmarks
+bench-storage:
+	@echo "Running storage benchmarks..."
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/storage
+
+## bench-observability: Run observability benchmarks
+bench-observability:
+	@echo "Running observability benchmarks..."
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/observability
+
+## bench-report: Run benchmarks and save results
+bench-report:
+	@echo "Running benchmarks and saving results..."
+	@mkdir -p test/benchmarks
+	@echo "Scheduler benchmarks..." > test/benchmarks/results.txt
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/scheduler >> test/benchmarks/results.txt
+	@echo "\nStorage benchmarks..." >> test/benchmarks/results.txt
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/storage >> test/benchmarks/results.txt
+	@echo "\nObservability benchmarks..." >> test/benchmarks/results.txt
+	$(GOTEST) -bench=. -benchmem -benchtime=5s ./pkg/observability >> test/benchmarks/results.txt
+	@echo "Benchmark results saved to test/benchmarks/results.txt"
 
 ## lint: Run golangci-lint
 lint:
@@ -200,6 +237,7 @@ install: build
 	@mkdir -p /usr/local/bin
 	@cp $(BUILD_DIR)/$(BINARY_NAME_COORDINATOR) /usr/local/bin/
 	@cp $(BUILD_DIR)/$(BINARY_NAME_AGENT) /usr/local/bin/
+	@cp $(BUILD_DIR)/cloudlessctl /usr/local/bin/
 	@echo "Installed to /usr/local/bin/"
 
 ## ci: Run CI pipeline locally
