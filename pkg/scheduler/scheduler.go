@@ -24,11 +24,11 @@ type Scheduler struct {
 // SchedulerConfig contains scheduler configuration
 type SchedulerConfig struct {
 	// Scoring weights
-	LocalityWeight     float64
-	ReliabilityWeight  float64
-	CostWeight         float64
-	UtilizationWeight  float64
-	NetworkWeight      float64
+	LocalityWeight        float64
+	ReliabilityWeight     float64
+	CostWeight            float64
+	UtilizationWeight     float64
+	NetworkPenaltyWeight  float64
 
 	// Scheduling policies
 	MaxRetries         int
@@ -109,6 +109,7 @@ type RolloutStrategy struct {
 	Strategy        string // "RollingUpdate", "Recreate", "BlueGreen"
 	MaxSurge        int
 	MaxUnavailable  int
+	MinAvailable    int    // Minimum replicas that must remain available during updates
 	PauseDuration   time.Duration
 }
 
@@ -148,7 +149,7 @@ func DefaultSchedulerConfig() *SchedulerConfig {
 		ReliabilityWeight: 0.30,
 		CostWeight:        0.15,
 		UtilizationWeight: 0.20,
-		NetworkWeight:     0.10,
+		NetworkPenaltyWeight:     0.10,
 		MaxRetries:        3,
 		RetryBackoff:      time.Second,
 		SpreadPolicy:      "zone",
@@ -181,7 +182,7 @@ func NewScheduler(membershipManager *membership.Manager, config *SchedulerConfig
 		ReliabilityWeight: config.ReliabilityWeight,
 		CostWeight:        config.CostWeight,
 		UtilizationWeight: config.UtilizationWeight,
-		NetworkWeight:     config.NetworkWeight,
+		NetworkPenaltyWeight:     config.NetworkPenaltyWeight,
 	}, logger)
 
 	// Initialize bin packer
@@ -775,7 +776,7 @@ func (s *Scheduler) UpdateSchedulerConfig(config *SchedulerConfig) {
 		ReliabilityWeight: config.ReliabilityWeight,
 		CostWeight:        config.CostWeight,
 		UtilizationWeight: config.UtilizationWeight,
-		NetworkWeight:     config.NetworkWeight,
+		NetworkPenaltyWeight:     config.NetworkPenaltyWeight,
 	})
 
 	s.logger.Info("Updated scheduler configuration",

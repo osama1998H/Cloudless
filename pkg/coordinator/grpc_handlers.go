@@ -376,6 +376,16 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		UpdatedAt:       time.Now(),
 	}
 
+	// Policy-based admission control
+	if err := c.AdmitWorkload(ctx, workload); err != nil {
+		c.logger.Warn("Workload admission denied",
+			zap.String("workload", workload.Name),
+			zap.String("namespace", workload.Namespace),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
 	// Save workload state to RAFT
 	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
 		c.logger.Error("Failed to save workload state",

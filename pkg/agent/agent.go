@@ -102,6 +102,7 @@ type Agent struct {
 
 	// Components
 	runtime         runtime.Runtime
+	probeExecutor   *runtime.ProbeExecutor
 	resourceMonitor *ResourceMonitor
 	metricsStorage  *MetricsStorage
 	coordinatorConn *grpc.ClientConn
@@ -160,6 +161,10 @@ func New(config *Config) (*Agent, error) {
 	} else {
 		return nil, fmt.Errorf("unsupported container runtime: %s", config.ContainerRuntime)
 	}
+
+	// Initialize health probe executor
+	config.Logger.Info("Initializing health probe executor")
+	a.probeExecutor = runtime.NewProbeExecutor(a.runtime, config.Logger)
 
 	// Initialize resource monitor
 	config.Logger.Info("Initializing resource monitor")
@@ -393,6 +398,12 @@ func (a *Agent) Stop(ctx context.Context) error {
 		if err := a.resourceMonitor.Stop(); err != nil {
 			a.logger.Error("Failed to stop resource monitor", zap.Error(err))
 		}
+	}
+
+	// Stop health probe executor
+	if a.probeExecutor != nil {
+		a.probeExecutor.Stop()
+		a.logger.Info("Health probe executor stopped")
 	}
 
 	// Close runtime

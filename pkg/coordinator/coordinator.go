@@ -12,7 +12,9 @@ import (
 	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/cloudless/cloudless/pkg/coordinator/membership"
 	"github.com/cloudless/cloudless/pkg/mtls"
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/cloudless/cloudless/pkg/overlay"
+	"github.com/cloudless/cloudless/pkg/policy"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"github.com/cloudless/cloudless/pkg/scheduler"
 	hashicorpraft "github.com/hashicorp/raft"
@@ -108,6 +110,8 @@ type Coordinator struct {
 	certManager      *mtls.CertificateManager
 	tokenManager     *mtls.TokenManager
 	workloadStateMgr *WorkloadStateManager
+	policyEngine     policy.PolicyEngine
+	eventStream      *observability.EventStream
 
 	// Overlay networking components
 	transport       *overlay.QUICTransport
@@ -236,11 +240,11 @@ func New(config *Config) (*Coordinator, error) {
 	// Initialize Scheduler
 	config.Logger.Info("Initializing Scheduler")
 	schedulerConfig := &scheduler.SchedulerConfig{
-		LocalityWeight:     config.SchedulerConfig.LocalityWeight,
-		ReliabilityWeight:  config.SchedulerConfig.ReliabilityWeight,
-		CostWeight:         config.SchedulerConfig.CostWeight,
-		UtilizationWeight:  config.SchedulerConfig.UtilizationWeight,
-		NetworkWeight:      config.SchedulerConfig.NetworkWeight,
+		LocalityWeight:        config.SchedulerConfig.LocalityWeight,
+		ReliabilityWeight:     config.SchedulerConfig.ReliabilityWeight,
+		CostWeight:            config.SchedulerConfig.CostWeight,
+		UtilizationWeight:     config.SchedulerConfig.UtilizationWeight,
+		NetworkPenaltyWeight:  config.SchedulerConfig.NetworkPenaltyWeight,
 		MaxRetries:         5,
 		RetryBackoff:       5 * time.Second,
 		SpreadPolicy:       "zone",
@@ -369,6 +373,20 @@ func New(config *Config) (*Coordinator, error) {
 // Start starts the coordinator
 func (c *Coordinator) Start(ctx context.Context) error {
 	c.logger.Info("Starting coordinator")
+
+	// Initialize event stream for observability
+	c.logger.Info("Initializing event stream")
+	c.eventStream = observability.NewEventStream(observability.EventStreamConfig{
+		MaxSize:   10000,
+		Retention: 24 * time.Hour,
+	}, c.logger)
+
+	// Initialize policy engine
+	c.logger.Info("Initializing policy engine")
+	if err := c.InitializePolicyEngine(); err != nil {
+		c.logger.Warn("Failed to initialize policy engine", zap.Error(err))
+		// Continue without policy engine - it's optional for backward compatibility
+	}
 
 	// RAFT store is already initialized and bootstrapped during NewStore()
 	// Wait for leader election

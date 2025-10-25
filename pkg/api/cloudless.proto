@@ -103,6 +103,29 @@ service NetworkService {
   rpc WatchServiceEndpoints(WatchServiceEndpointsRequest) returns (stream ServiceEndpointEvent);
 }
 
+// SecretsService handles encrypted secrets management
+// Implements envelope encryption with AES-256-GCM and token-based access control
+service SecretsService {
+  // Secret management
+  rpc CreateSecret(CreateSecretRequest) returns (SecretResponse);
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc UpdateSecret(UpdateSecretRequest) returns (SecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (google.protobuf.Empty);
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
+
+  // Access token management
+  rpc GenerateAccessToken(GenerateAccessTokenRequest) returns (GenerateAccessTokenResponse);
+  rpc RevokeAccessToken(RevokeAccessTokenRequest) returns (google.protobuf.Empty);
+  rpc ValidateAccessToken(ValidateAccessTokenRequest) returns (ValidateAccessTokenResponse);
+
+  // Key management
+  rpc RotateMasterKey(RotateMasterKeyRequest) returns (RotateMasterKeyResponse);
+  rpc GetMasterKeyInfo(GetMasterKeyInfoRequest) returns (MasterKeyInfo);
+
+  // Audit
+  rpc GetSecretAuditLog(GetSecretAuditLogRequest) returns (GetSecretAuditLogResponse);
+}
+
 // ============================================================================
 // Common Messages
 // ============================================================================
@@ -302,7 +325,8 @@ message RolloutStrategy {
   Strategy strategy = 1;
   int32 max_surge = 2;
   int32 max_unavailable = 3;
-  google.protobuf.Duration pause_duration = 4;
+  int32 min_available = 4;  // Minimum replicas that must remain available during updates
+  google.protobuf.Duration pause_duration = 5;
 }
 
 // Volume represents storage
@@ -963,4 +987,189 @@ message ServiceEndpointEvent {
 
   EventType type = 1;
   Endpoint endpoint = 2;
+}
+
+// ============================================================================
+// Secrets Service Messages
+// ============================================================================
+
+// SecretMetadata represents secret metadata (no sensitive data)
+message SecretMetadata {
+  string name = 1;
+  string namespace = 2;
+  uint64 version = 3;
+  repeated string audiences = 4;
+  int64 ttl_seconds = 5;
+  bool immutable = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp expires_at = 9;
+  map<string, string> labels = 10;
+  int32 data_key_count = 11;
+}
+
+// SecretData contains encrypted secret data
+message SecretData {
+  // Map of key -> encrypted value
+  map<string, bytes> encrypted_data = 1;
+
+  // Envelope encryption metadata
+  bytes encrypted_data_key = 2;  // Data key encrypted with master key
+  string key_id = 3;              // Master key identifier
+  string algorithm = 4;           // AES-256-GCM
+  bytes nonce = 5;                // GCM nonce
+}
+
+// SecretResponse combines metadata and data
+message SecretResponse {
+  SecretMetadata metadata = 1;
+  SecretData data = 2;
+}
+
+// AccessToken represents a short-lived secret access token
+message AccessToken {
+  string token_id = 1;
+  string secret_ref = 2;  // "namespace/name"
+  string audience = 3;
+  string token = 4;        // JWT token string
+  google.protobuf.Timestamp issued_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+  int32 uses_remaining = 7;  // -1 for unlimited
+  google.protobuf.Timestamp last_used_at = 8;
+}
+
+// MasterKeyInfo contains information about the master key (no key material)
+message MasterKeyInfo {
+  string key_id = 1;
+  string algorithm = 2;
+  bool active = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp rotated_at = 5;
+}
+
+// SecretAuditEntry represents an audit log entry
+message SecretAuditEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string action = 2;         // Create, Access, Update, Delete, Rotate
+  string secret_ref = 3;     // "namespace/name"
+  string actor = 4;          // Workload/service that performed action
+  bool success = 5;
+  string reason = 6;
+  string source_ip = 7;
+  string token_id = 8;
+}
+
+// Secrets requests
+message CreateSecretRequest {
+  string name = 1;
+  string namespace = 2;
+  map<string, bytes> data = 3;  // key -> plaintext value (will be encrypted)
+
+  // Options
+  repeated string audiences = 4;      // Workloads/services that can access
+  int64 ttl_seconds = 5;              // Token TTL (default 15min)
+  bool immutable = 6;                 // Cannot be updated after creation
+  google.protobuf.Timestamp expires_at = 7;  // Secret expiration
+  map<string, string> labels = 8;
+}
+
+message GetSecretRequest {
+  string name = 1;
+  string namespace = 2;
+  string access_token = 3;  // Required for authentication
+  string audience = 4;      // Caller identity (workload/service)
+}
+
+message GetSecretResponse {
+  SecretMetadata metadata = 1;
+  map<string, bytes> data = 2;  // key -> decrypted plaintext value
+}
+
+message UpdateSecretRequest {
+  string name = 1;
+  string namespace = 2;
+  map<string, bytes> data = 3;  // New data (will be encrypted)
+
+  // Update options
+  repeated string audiences = 4;  // Update allowed audiences
+  repeated string update_mask = 5;  // Fields to update
+  bool revoke_existing_tokens = 6;  // Revoke all existing access tokens
+}
+
+message DeleteSecretRequest {
+  string name = 1;
+  string namespace = 2;
+  bool revoke_tokens = 3;  // Revoke all access tokens
+}
+
+message ListSecretsRequest {
+  string namespace = 1;
+  map<string, string> label_selector = 2;
+  string name_prefix = 3;
+  int32 limit = 4;
+  string continue_token = 5;
+}
+
+message ListSecretsResponse {
+  repeated SecretMetadata secrets = 1;  // Metadata only, no sensitive data
+  string next_token = 2;
+}
+
+message GenerateAccessTokenRequest {
+  string name = 1;
+  string namespace = 2;
+  string audience = 3;           // Workload/service requesting access
+  int64 ttl_seconds = 4;         // Token TTL (max 24h)
+  int32 max_uses = 5;            // Max number of uses (-1 for unlimited)
+}
+
+message GenerateAccessTokenResponse {
+  AccessToken token = 1;
+}
+
+message RevokeAccessTokenRequest {
+  oneof target {
+    string token_id = 1;        // Revoke specific token
+    string secret_ref = 2;      // Revoke all tokens for secret ("namespace/name")
+  }
+}
+
+message ValidateAccessTokenRequest {
+  string token = 1;
+  string secret_ref = 2;  // "namespace/name"
+  string audience = 3;
+}
+
+message ValidateAccessTokenResponse {
+  bool valid = 1;
+  string reason = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  int32 uses_remaining = 4;
+}
+
+message RotateMasterKeyRequest {
+  bool re_encrypt_all = 1;  // Re-encrypt all secrets with new key
+}
+
+message RotateMasterKeyResponse {
+  MasterKeyInfo old_key = 1;
+  MasterKeyInfo new_key = 2;
+  int32 secrets_re_encrypted = 3;
+}
+
+message GetMasterKeyInfoRequest {
+  string key_id = 1;  // Empty for active key
+}
+
+message GetSecretAuditLogRequest {
+  string secret_ref = 1;  // "namespace/name" (empty for all)
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  int32 limit = 4;
+  string continue_token = 5;
+}
+
+message GetSecretAuditLogResponse {
+  repeated SecretAuditEntry entries = 1;
+  string next_token = 2;
 }
