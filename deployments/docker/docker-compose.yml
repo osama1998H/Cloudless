@@ -211,6 +211,36 @@ services:
       - COLLECTOR_ZIPKIN_HOST_PORT=:9411
     restart: unless-stopped
 
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: cloudless-loki
+    networks:
+      cloudless:
+        ipv4_address: 172.28.0.33
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+      - ./config/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  # Promtail for log collection
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: cloudless-promtail
+    networks:
+      cloudless:
+        ipv4_address: 172.28.0.34
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
 volumes:
   coordinator-data:
   agent1-data:
@@ -218,3 +248,4 @@ volumes:
   agent3-data:
   prometheus-data:
   grafana-data:
+  loki-data:
