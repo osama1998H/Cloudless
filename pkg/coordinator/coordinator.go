@@ -99,11 +99,12 @@ type Coordinator struct {
 	logger *zap.Logger
 
 	// Core components
-	raftStore      *raft.Store
-	membershipMgr  *membership.Manager
-	scheduler      *scheduler.Scheduler
-	ca             *mtls.CA
-	tokenManager   *mtls.TokenManager
+	raftStore       *raft.Store
+	membershipMgr   *membership.Manager
+	scheduler       *scheduler.Scheduler
+	ca              *mtls.CA
+	tokenManager    *mtls.TokenManager
+	workloadStateMgr *WorkloadStateManager
 
 	// Overlay networking components
 	transport       *overlay.QUICTransport
@@ -198,6 +199,14 @@ func New(config *Config) (*Coordinator, error) {
 		return nil, fmt.Errorf("failed to initialize RAFT store: %w", err)
 	}
 	c.raftStore = raftStore
+
+	// Initialize Workload State Manager
+	config.Logger.Info("Initializing Workload State Manager")
+	workloadStateMgr, err := NewWorkloadStateManager(raftStore, config.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize workload state manager: %w", err)
+	}
+	c.workloadStateMgr = workloadStateMgr
 
 	// Initialize Overlay Networking Components
 	config.Logger.Info("Initializing Overlay Networking")

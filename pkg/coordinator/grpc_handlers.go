@@ -206,54 +206,153 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		return nil, fmt.Errorf("not the leader, redirect to: %s", c.GetLeader())
 	}
 
+	workload := req.GetWorkload()
+	if workload == nil {
+		return nil, fmt.Errorf("workload spec is required")
+	}
+	spec := workload.GetSpec()
+	if spec == nil {
+		return nil, fmt.Errorf("workload spec is required")
+	}
+
 	c.logger.Info("Creating workload",
-		zap.String("name", req.Name),
-		zap.String("namespace", req.Namespace),
-		zap.Int32("replicas", req.Replicas),
+		zap.String("name", workload.Name),
+		zap.String("namespace", workload.Namespace),
+		zap.Int32("replicas", spec.Replicas),
 	)
 
-	// Convert API workload spec to scheduler workload spec
-	spec := scheduler.WorkloadSpec{
-		ID:        fmt.Sprintf("%s-%s", req.Namespace, req.Name),
-		Name:      req.Name,
-		Namespace: req.Namespace,
-		Replicas:  int(req.Replicas),
-		Priority:  int(req.Priority),
-		Resources: scheduler.ResourceRequirements{
-			Requests: scheduler.ResourceSpec{
-				CPUMillicores: int64(req.Resources.CpuMillicores),
-				MemoryBytes:   req.Resources.MemoryBytes,
-				StorageBytes:  req.Resources.StorageBytes,
-			},
-			Limits: scheduler.ResourceSpec{
-				CPUMillicores: int64(req.Resources.CpuMillicores) * 2, // Default to 2x requests
-				MemoryBytes:   req.Resources.MemoryBytes * 2,
-				StorageBytes:  req.Resources.StorageBytes,
-			},
+	// Generate workload ID
+	workloadID := workload.Id
+	if workloadID == "" {
+		workloadID = fmt.Sprintf("%s-%s", workload.Namespace, workload.Name)
+	}
+
+	// Convert API volumes to state manager format
+	volumes := make([]VolumeMount, 0, len(spec.Volumes))
+	for _, v := range spec.Volumes {
+		volumes = append(volumes, VolumeMount{
+			Name:      v.Name,
+			MountPath: v.MountPath,
+			ReadOnly:  v.ReadOnly,
+		})
+	}
+
+	// Convert API ports to state manager format
+	ports := make([]PortMapping, 0, len(spec.Ports))
+	for _, p := range spec.Ports {
+		ports = append(ports, PortMapping{
+			Name:          p.Name,
+			ContainerPort: p.ContainerPort,
+			Protocol:      p.Protocol,
+		})
+	}
+
+	// Convert resources
+	resources := scheduler.ResourceRequirements{
+		Requests: scheduler.ResourceSpec{
+			CPUMillicores: int64(spec.Resources.Requests.CpuMillicores),
+			MemoryBytes:   spec.Resources.Requests.MemoryBytes,
+			StorageBytes:  spec.Resources.Requests.StorageBytes,
 		},
-		// TODO: Map other fields (image, command, env, etc.)
+		Limits: scheduler.ResourceSpec{
+			CPUMillicores: int64(spec.Resources.Limits.CpuMillicores),
+			MemoryBytes:   spec.Resources.Limits.MemoryBytes,
+			StorageBytes:  spec.Resources.Limits.StorageBytes,
+		},
+	}
+
+	// Convert placement policy
+	placement := scheduler.PlacementPolicy{
+		Regions:       spec.Placement.Regions,
+		Zones:         spec.Placement.Zones,
+		NodeSelector:  spec.Placement.NodeSelector,
+	}
+
+	// Convert restart policy
+	restartPolicy := scheduler.RestartPolicy{
+		Policy:     scheduler.RestartPolicyType(spec.RestartPolicy.Policy),
+		MaxRetries: int(spec.RestartPolicy.MaxRetries),
+	}
+
+	// Convert rollout strategy
+	rolloutStrategy := scheduler.RolloutStrategy{
+		Strategy:       scheduler.RolloutStrategyType(spec.Rollout.Strategy),
+		MaxSurge:       int(spec.Rollout.MaxSurge),
+		MaxUnavailable: int(spec.Rollout.MaxUnavailable),
+	}
+
+	// Create workload state
+	workloadState := &WorkloadState{
+		ID:              workloadID,
+		Name:            workload.Name,
+		Namespace:       workload.Namespace,
+		Image:           spec.Image,
+		Command:         spec.Command,
+		Args:            spec.Args,
+		Env:             spec.Env,
+		Volumes:         volumes,
+		Ports:           ports,
+		Resources:       resources,
+		Placement:       placement,
+		Restart:         restartPolicy,
+		Rollout:         rolloutStrategy,
+		DesiredReplicas: spec.Replicas,
+		Status:          WorkloadStatusPending,
+		Labels:          workload.Labels,
+		Annotations:     workload.Annotations,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+
+	// Save workload state to RAFT
+	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
+		c.logger.Error("Failed to save workload state",
+			zap.String("workload_id", workloadID),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to save workload state: %w", err)
+	}
+
+	// Update status to scheduling
+	workloadState.Status = WorkloadStatusScheduling
+	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
+		c.logger.Warn("Failed to update workload status",
+			zap.String("workload_id", workloadID),
+			zap.Error(err),
+		)
+	}
+
+	// Convert to scheduler workload spec for scheduling
+	schedulerSpec := scheduler.WorkloadSpec{
+		ID:        workloadID,
+		Name:      workload.Name,
+		Namespace: workload.Namespace,
+		Replicas:  int(spec.Replicas),
+		Resources: resources,
+		Placement: placement,
 	}
 
 	// Schedule the workload
-	decisions, err := c.ScheduleWorkload(ctx, spec)
+	decisions, err := c.ScheduleWorkload(ctx, schedulerSpec)
 	if err != nil {
 		c.logger.Error("Failed to schedule workload",
-			zap.String("name", req.Name),
+			zap.String("workload_id", workloadID),
 			zap.Error(err),
 		)
+
+		// Update state to failed
+		workloadState.Status = WorkloadStatusFailed
+		c.workloadStateMgr.SaveWorkload(ctx, workloadState)
+
 		return nil, fmt.Errorf("failed to schedule workload: %w", err)
 	}
 
 	// Queue assignments for each node
 	for _, decision := range decisions {
 		assignment := &api.WorkloadAssignment{
-			WorkloadId: spec.ID,
-			NodeId:     decision.NodeID,
-			Resources: &api.ResourceAllocation{
-				CpuMillicores: int32(decision.Resources.CPUMillicores),
-				MemoryBytes:   decision.Resources.MemoryBytes,
-				StorageBytes:  decision.Resources.StorageBytes,
-			},
+			FragmentId: decision.FragmentID,
+			Workload:   workload,
+			Action:     "run",
 		}
 		if err := c.membershipMgr.QueueAssignment(decision.NodeID, assignment); err != nil {
 			c.logger.Error("Failed to queue assignment",
@@ -263,17 +362,27 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		}
 	}
 
+	// Update workload state with scheduled status
+	workloadState.Status = WorkloadStatusRunning
+	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
+		c.logger.Warn("Failed to update workload status",
+			zap.String("workload_id", workloadID),
+			zap.Error(err),
+		)
+	}
+
 	c.logger.Info("Workload created and scheduled",
-		zap.String("name", req.Name),
+		zap.String("workload_id", workloadID),
 		zap.Int("placements", len(decisions)),
 	)
 
 	return &api.Workload{
-		Id:        spec.ID,
-		Name:      spec.Name,
-		Namespace: spec.Namespace,
-		Replicas:  req.Replicas,
-		State:     "Scheduled",
+		Id:          workloadID,
+		Name:        workload.Name,
+		Namespace:   workload.Namespace,
+		Spec:        spec,
+		Labels:      workload.Labels,
+		Annotations: workload.Annotations,
 	}, nil
 }
 
@@ -283,18 +392,140 @@ func (c *Coordinator) UpdateWorkload(ctx context.Context, req *api.UpdateWorkloa
 		return nil, fmt.Errorf("not the leader, redirect to: %s", c.GetLeader())
 	}
 
+	workload := req.GetWorkload()
+	if workload == nil {
+		return nil, fmt.Errorf("workload is required")
+	}
+
+	workloadID := workload.Id
+	if workloadID == "" {
+		return nil, fmt.Errorf("workload ID is required")
+	}
+
 	c.logger.Info("Updating workload",
-		zap.String("workload_id", req.WorkloadId),
+		zap.String("workload_id", workloadID),
 	)
 
-	// TODO: Implement workload update logic
-	// This would involve:
-	// 1. Looking up existing workload state
-	// 2. Computing diff between current and desired state
-	// 3. Issuing update/migration commands to affected nodes
-	// 4. Updating workload state in RAFT
+	// Get existing workload state
+	existingState, err := c.workloadStateMgr.GetWorkload(ctx, workloadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get existing workload: %w", err)
+	}
 
-	return nil, fmt.Errorf("workload update not yet implemented")
+	spec := workload.GetSpec()
+	if spec != nil {
+		// Update status to updating
+		existingState.Status = WorkloadStatusUpdating
+
+		// Update spec fields
+		if spec.Image != "" {
+			existingState.Image = spec.Image
+		}
+		if len(spec.Command) > 0 {
+			existingState.Command = spec.Command
+		}
+		if len(spec.Args) > 0 {
+			existingState.Args = spec.Args
+		}
+		if len(spec.Env) > 0 {
+			existingState.Env = spec.Env
+		}
+
+		// Update volumes
+		if len(spec.Volumes) > 0 {
+			volumes := make([]VolumeMount, 0, len(spec.Volumes))
+			for _, v := range spec.Volumes {
+				volumes = append(volumes, VolumeMount{
+					Name:      v.Name,
+					MountPath: v.MountPath,
+					ReadOnly:  v.ReadOnly,
+				})
+			}
+			existingState.Volumes = volumes
+		}
+
+		// Update ports
+		if len(spec.Ports) > 0 {
+			ports := make([]PortMapping, 0, len(spec.Ports))
+			for _, p := range spec.Ports {
+				ports = append(ports, PortMapping{
+					Name:          p.Name,
+					ContainerPort: p.ContainerPort,
+					Protocol:      p.Protocol,
+				})
+			}
+			existingState.Ports = ports
+		}
+
+		// Update resources if provided
+		if spec.Resources != nil {
+			existingState.Resources = scheduler.ResourceRequirements{
+				Requests: scheduler.ResourceSpec{
+					CPUMillicores: int64(spec.Resources.Requests.CpuMillicores),
+					MemoryBytes:   spec.Resources.Requests.MemoryBytes,
+					StorageBytes:  spec.Resources.Requests.StorageBytes,
+				},
+				Limits: scheduler.ResourceSpec{
+					CPUMillicores: int64(spec.Resources.Limits.CpuMillicores),
+					MemoryBytes:   spec.Resources.Limits.MemoryBytes,
+					StorageBytes:  spec.Resources.Limits.StorageBytes,
+				},
+			}
+		}
+
+		// Update desired replicas
+		if spec.Replicas > 0 {
+			existingState.DesiredReplicas = spec.Replicas
+		}
+	}
+
+	// Update labels and annotations
+	if len(workload.Labels) > 0 {
+		existingState.Labels = workload.Labels
+	}
+	if len(workload.Annotations) > 0 {
+		existingState.Annotations = workload.Annotations
+	}
+
+	// Save updated workload state
+	if err := c.workloadStateMgr.SaveWorkload(ctx, existingState); err != nil {
+		c.logger.Error("Failed to save updated workload",
+			zap.String("workload_id", workloadID),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to save updated workload: %w", err)
+	}
+
+	// Queue update commands to affected nodes
+	for _, replica := range existingState.Replicas {
+		if replica.Status == ReplicaStatusRunning {
+			assignment := &api.WorkloadAssignment{
+				FragmentId: replica.FragmentID,
+				Workload:   workload,
+				Action:     "update",
+			}
+			if err := c.membershipMgr.QueueAssignment(replica.NodeID, assignment); err != nil {
+				c.logger.Error("Failed to queue update assignment",
+					zap.String("node_id", replica.NodeID),
+					zap.String("replica_id", replica.ID),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
+	c.logger.Info("Workload updated",
+		zap.String("workload_id", workloadID),
+	)
+
+	return &api.Workload{
+		Id:          workloadID,
+		Name:        existingState.Name,
+		Namespace:   existingState.Namespace,
+		Spec:        spec,
+		Labels:      existingState.Labels,
+		Annotations: existingState.Annotations,
+	}, nil
 }
 
 // DeleteWorkload deletes a workload
@@ -307,13 +538,57 @@ func (c *Coordinator) DeleteWorkload(ctx context.Context, req *api.DeleteWorkloa
 		zap.String("workload_id", req.WorkloadId),
 	)
 
-	// TODO: Implement workload deletion logic
-	// This would involve:
-	// 1. Finding all nodes running this workload
-	// 2. Sending stop commands to those nodes
-	// 3. Removing workload state from RAFT
+	// Get workload state
+	workloadState, err := c.workloadStateMgr.GetWorkload(ctx, req.WorkloadId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workload: %w", err)
+	}
 
-	return &emptypb.Empty{}, fmt.Errorf("workload deletion not yet implemented")
+	// Mark workload as deleting (soft delete)
+	if err := c.workloadStateMgr.DeleteWorkload(ctx, req.WorkloadId); err != nil {
+		c.logger.Error("Failed to mark workload as deleted",
+			zap.String("workload_id", req.WorkloadId),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to mark workload as deleted: %w", err)
+	}
+
+	// Send stop commands to all nodes running replicas
+	for _, replica := range workloadState.Replicas {
+		if replica.Status != ReplicaStatusStopped && replica.Status != ReplicaStatusFailed {
+			assignment := &api.WorkloadAssignment{
+				FragmentId: replica.FragmentID,
+				Workload:   &api.Workload{Id: req.WorkloadId},
+				Action:     "stop",
+			}
+			if err := c.membershipMgr.QueueAssignment(replica.NodeID, assignment); err != nil {
+				c.logger.Error("Failed to queue stop assignment",
+					zap.String("node_id", replica.NodeID),
+					zap.String("replica_id", replica.ID),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
+	c.logger.Info("Workload deletion initiated",
+		zap.String("workload_id", req.WorkloadId),
+		zap.Int("replicas_to_stop", len(workloadState.Replicas)),
+	)
+
+	// If graceful deletion requested, wait for cleanup
+	// Otherwise, purge immediately
+	if !req.Graceful {
+		// Purge workload from RAFT (hard delete)
+		if err := c.workloadStateMgr.PurgeWorkload(ctx, req.WorkloadId); err != nil {
+			c.logger.Warn("Failed to purge workload",
+				zap.String("workload_id", req.WorkloadId),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return &emptypb.Empty{}, nil
 }
 
 // GetWorkload retrieves information about a workload
@@ -322,8 +597,31 @@ func (c *Coordinator) GetWorkload(ctx context.Context, req *api.GetWorkloadReque
 		zap.String("workload_id", req.WorkloadId),
 	)
 
-	// TODO: Implement workload lookup from RAFT state
-	return nil, fmt.Errorf("workload get not yet implemented")
+	// Retrieve workload from state manager
+	workload, err := c.workloadStateMgr.GetWorkload(ctx, req.WorkloadId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workload: %w", err)
+	}
+
+	// Convert to API format
+	apiWorkload := &api.Workload{
+		Id:        workload.ID,
+		Name:      workload.Name,
+		Namespace: workload.Namespace,
+		Image:     workload.Image,
+		Replicas:  workload.DesiredReplicas,
+		State:     string(workload.Status),
+		Labels:    workload.Labels,
+		Resources: &api.ResourceSpec{
+			CpuMillicores: int32(workload.Resources.Requests.CPUMillicores),
+			MemoryBytes:   workload.Resources.Requests.MemoryBytes,
+			StorageBytes:  workload.Resources.Requests.StorageBytes,
+		},
+		CreatedAt: workload.CreatedAt.Unix(),
+		UpdatedAt: workload.UpdatedAt.Unix(),
+	}
+
+	return apiWorkload, nil
 }
 
 // ListWorkloads lists all workloads
@@ -332,9 +630,35 @@ func (c *Coordinator) ListWorkloads(ctx context.Context, req *api.ListWorkloadsR
 		zap.String("namespace", req.Namespace),
 	)
 
-	// TODO: Implement workload listing from RAFT state
+	// List workloads from state manager with filtering
+	workloads, err := c.workloadStateMgr.ListWorkloads(ctx, req.Namespace, req.Labels)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workloads: %w", err)
+	}
+
+	// Convert to API format
+	apiWorkloads := make([]*api.Workload, 0, len(workloads))
+	for _, workload := range workloads {
+		apiWorkloads = append(apiWorkloads, &api.Workload{
+			Id:        workload.ID,
+			Name:      workload.Name,
+			Namespace: workload.Namespace,
+			Image:     workload.Image,
+			Replicas:  workload.DesiredReplicas,
+			State:     string(workload.Status),
+			Labels:    workload.Labels,
+			Resources: &api.ResourceSpec{
+				CpuMillicores: int32(workload.Resources.Requests.CPUMillicores),
+				MemoryBytes:   workload.Resources.Requests.MemoryBytes,
+				StorageBytes:  workload.Resources.Requests.StorageBytes,
+			},
+			CreatedAt: workload.CreatedAt.Unix(),
+			UpdatedAt: workload.UpdatedAt.Unix(),
+		})
+	}
+
 	return &api.ListWorkloadsResponse{
-		Workloads: []*api.Workload{},
+		Workloads: apiWorkloads,
 	}, nil
 }
 
@@ -349,14 +673,131 @@ func (c *Coordinator) ScaleWorkload(ctx context.Context, req *api.ScaleWorkloadR
 		zap.Int32("replicas", req.Replicas),
 	)
 
-	// TODO: Implement workload scaling logic
-	// This would involve:
-	// 1. Looking up current workload state
-	// 2. Computing scale up/down operations
-	// 3. Scheduling new replicas or stopping existing ones
-	// 4. Updating workload state in RAFT
+	// Get workload state
+	workloadState, err := c.workloadStateMgr.GetWorkload(ctx, req.WorkloadId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workload: %w", err)
+	}
 
-	return nil, fmt.Errorf("workload scaling not yet implemented")
+	currentReplicas := workloadState.CurrentReplicas
+	desiredReplicas := req.Replicas
+
+	c.logger.Info("Scaling workload",
+		zap.String("workload_id", req.WorkloadId),
+		zap.Int32("current_replicas", currentReplicas),
+		zap.Int32("desired_replicas", desiredReplicas),
+	)
+
+	// Update desired replicas
+	workloadState.DesiredReplicas = desiredReplicas
+	workloadState.Status = WorkloadStatusScaling
+
+	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
+		return nil, fmt.Errorf("failed to save workload state: %w", err)
+	}
+
+	if desiredReplicas > currentReplicas {
+		// Scale up: schedule new replicas
+		replicasToAdd := int(desiredReplicas - currentReplicas)
+		c.logger.Info("Scaling up",
+			zap.String("workload_id", req.WorkloadId),
+			zap.Int("replicas_to_add", replicasToAdd),
+		)
+
+		// Create scheduler spec for new replicas
+		schedulerSpec := scheduler.WorkloadSpec{
+			ID:        workloadState.ID,
+			Name:      workloadState.Name,
+			Namespace: workloadState.Namespace,
+			Replicas:  replicasToAdd,
+			Resources: workloadState.Resources,
+			Placement: workloadState.Placement,
+		}
+
+		// Schedule new replicas
+		decisions, err := c.ScheduleWorkload(ctx, schedulerSpec)
+		if err != nil {
+			c.logger.Error("Failed to schedule new replicas",
+				zap.String("workload_id", req.WorkloadId),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("failed to schedule new replicas: %w", err)
+		}
+
+		// Queue assignments for new replicas
+		for _, decision := range decisions {
+			assignment := &api.WorkloadAssignment{
+				FragmentId: decision.FragmentID,
+				Workload: &api.Workload{
+					Id:        workloadState.ID,
+					Name:      workloadState.Name,
+					Namespace: workloadState.Namespace,
+					Spec: &api.WorkloadSpec{
+						Image:     workloadState.Image,
+						Command:   workloadState.Command,
+						Args:      workloadState.Args,
+						Env:       workloadState.Env,
+						Replicas:  desiredReplicas,
+					},
+				},
+				Action: "run",
+			}
+			if err := c.membershipMgr.QueueAssignment(decision.NodeID, assignment); err != nil {
+				c.logger.Error("Failed to queue scale-up assignment",
+					zap.String("node_id", decision.NodeID),
+					zap.Error(err),
+				)
+			}
+		}
+
+	} else if desiredReplicas < currentReplicas {
+		// Scale down: stop excess replicas
+		replicasToRemove := int(currentReplicas - desiredReplicas)
+		c.logger.Info("Scaling down",
+			zap.String("workload_id", req.WorkloadId),
+			zap.Int("replicas_to_remove", replicasToRemove),
+		)
+
+		// Select replicas to remove (prioritize failed/stopped ones first)
+		replicasRemoved := 0
+		for i := len(workloadState.Replicas) - 1; i >= 0 && replicasRemoved < replicasToRemove; i-- {
+			replica := workloadState.Replicas[i]
+
+			// Send stop command
+			assignment := &api.WorkloadAssignment{
+				FragmentId: replica.FragmentID,
+				Workload:   &api.Workload{Id: req.WorkloadId},
+				Action:     "stop",
+			}
+			if err := c.membershipMgr.QueueAssignment(replica.NodeID, assignment); err != nil {
+				c.logger.Error("Failed to queue scale-down assignment",
+					zap.String("node_id", replica.NodeID),
+					zap.String("replica_id", replica.ID),
+					zap.Error(err),
+				)
+			} else {
+				replicasRemoved++
+			}
+		}
+	}
+
+	c.logger.Info("Workload scaling initiated",
+		zap.String("workload_id", req.WorkloadId),
+		zap.Int32("current", currentReplicas),
+		zap.Int32("desired", desiredReplicas),
+	)
+
+	return &api.Workload{
+		Id:        workloadState.ID,
+		Name:      workloadState.Name,
+		Namespace: workloadState.Namespace,
+		Spec: &api.WorkloadSpec{
+			Image:    workloadState.Image,
+			Replicas: desiredReplicas,
+		},
+		Labels:      workloadState.Labels,
+		Annotations: workloadState.Annotations,
+	}, nil
 }
 
 // Schedule performs scheduling for a workload
@@ -424,15 +865,106 @@ func (c *Coordinator) Reschedule(ctx context.Context, req *api.RescheduleRequest
 		zap.String("reason", req.Reason),
 	)
 
-	// TODO: Implement rescheduling logic
-	// This would involve:
-	// 1. Looking up current workload placements
-	// 2. Determining which replicas need to be rescheduled
-	// 3. Finding new nodes for those replicas
-	// 4. Issuing migration commands
+	// Get workload state
+	workloadState, err := c.workloadStateMgr.GetWorkload(ctx, req.WorkloadId)
+	if err != nil {
+		return &api.RescheduleResponse{
+			Success: false,
+		}, fmt.Errorf("failed to get workload: %w", err)
+	}
+
+	// Build scheduler spec
+	schedulerSpec := scheduler.WorkloadSpec{
+		ID:        workloadState.ID,
+		Name:      workloadState.Name,
+		Namespace: workloadState.Namespace,
+		Replicas:  int(workloadState.DesiredReplicas),
+		Resources: workloadState.Resources,
+		Placement: workloadState.Placement,
+	}
+
+	// Find new placement for replicas
+	decisions, err := c.ScheduleWorkload(ctx, schedulerSpec)
+	if err != nil {
+		c.logger.Error("Failed to reschedule workload",
+			zap.String("workload_id", req.WorkloadId),
+			zap.Error(err),
+		)
+		return &api.RescheduleResponse{
+			Success: false,
+		}, fmt.Errorf("failed to reschedule workload: %w", err)
+	}
+
+	// Stop old replicas and start new ones
+	oldDecisions := make([]*api.ScheduleDecision, 0, len(workloadState.Replicas))
+	newDecisions := make([]*api.ScheduleDecision, 0, len(decisions))
+
+	// Stop old replicas
+	for _, replica := range workloadState.Replicas {
+		if replica.Status == ReplicaStatusRunning {
+			oldDecisions = append(oldDecisions, &api.ScheduleDecision{
+				ReplicaId:  replica.ID,
+				NodeId:     replica.NodeID,
+				FragmentId: replica.FragmentID,
+			})
+
+			// Queue stop command
+			assignment := &api.WorkloadAssignment{
+				FragmentId: replica.FragmentID,
+				Workload:   &api.Workload{Id: req.WorkloadId},
+				Action:     "stop",
+			}
+			if err := c.membershipMgr.QueueAssignment(replica.NodeID, assignment); err != nil {
+				c.logger.Error("Failed to queue stop for reschedule",
+					zap.String("node_id", replica.NodeID),
+					zap.String("replica_id", replica.ID),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
+	// Start new replicas on new nodes
+	for _, decision := range decisions {
+		newDecisions = append(newDecisions, &api.ScheduleDecision{
+			NodeId:     decision.NodeID,
+			FragmentId: decision.FragmentID,
+			Score:      decision.Score,
+		})
+
+		// Queue run command
+		assignment := &api.WorkloadAssignment{
+			FragmentId: decision.FragmentID,
+			Workload: &api.Workload{
+				Id:        workloadState.ID,
+				Name:      workloadState.Name,
+				Namespace: workloadState.Namespace,
+				Spec: &api.WorkloadSpec{
+					Image:    workloadState.Image,
+					Command:  workloadState.Command,
+					Args:     workloadState.Args,
+					Env:      workloadState.Env,
+					Replicas: workloadState.DesiredReplicas,
+				},
+			},
+			Action: "run",
+		}
+		if err := c.membershipMgr.QueueAssignment(decision.NodeID, assignment); err != nil {
+			c.logger.Error("Failed to queue run for reschedule",
+				zap.String("node_id", decision.NodeID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	c.logger.Info("Workload rescheduled",
+		zap.String("workload_id", req.WorkloadId),
+		zap.Int("old_replicas", len(oldDecisions)),
+		zap.Int("new_replicas", len(newDecisions)),
+	)
 
 	return &api.RescheduleResponse{
-		Success:    false,
-		Placements: []*api.Placement{},
-	}, fmt.Errorf("rescheduling not yet implemented")
+		OldDecisions: oldDecisions,
+		NewDecisions: newDecisions,
+	}, nil
 }

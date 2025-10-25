@@ -443,6 +443,10 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 
 // performEnrollment performs the node enrollment process
 func (a *Agent) performEnrollment(ctx context.Context) error {
+	// Detect hardware accelerator type
+	hwDetector := NewHardwareDetector(a.logger)
+	acceleratorType := hwDetector.DetectAcceleratorType()
+
 	// Prepare enrollment request
 	enrollReq := &api.EnrollNodeRequest{
 		NodeID:   a.config.NodeID,
@@ -453,7 +457,7 @@ func (a *Agent) performEnrollment(ctx context.Context) error {
 		JoinToken: a.config.JoinToken,
 		Capabilities: api.NodeCapabilities{
 			GPUCount:        a.config.Resources.GPU,
-			AcceleratorType: "", // TODO: Detect from hardware
+			AcceleratorType: acceleratorType,
 			NetworkFeatures: []string{"quic", "udp", "tcp"},
 			StorageTypes:    []string{"local", "ephemeral"},
 		},
@@ -474,42 +478,59 @@ func (a *Agent) performEnrollment(ctx context.Context) error {
 		zap.Int64("memory_bytes", enrollReq.Resources.MemoryBytes),
 	)
 
-	// TODO: Once protobuf is generated, call:
-	// resp, err := a.coordinatorClient.EnrollNode(ctx, enrollReq)
-	// if err != nil {
-	//     return fmt.Errorf("enrollment RPC failed: %w", err)
-	// }
+	// Create coordinator client
+	coordinatorClient := api.NewCoordinatorServiceClient(a.coordinatorConn)
 
-	// For now, just log that we would send the request
-	a.logger.Info("Enrollment request prepared (waiting for protobuf generation to send actual RPC)",
-		zap.Any("request", enrollReq),
+	// Call enrollment RPC
+	resp, err := coordinatorClient.EnrollNode(ctx, enrollReq)
+	if err != nil {
+		return fmt.Errorf("enrollment RPC failed: %w", err)
+	}
+
+	a.logger.Info("Enrollment successful",
+		zap.String("node_id", resp.NodeId),
 	)
 
-	// TODO: Store received certificate
-	// if len(resp.Certificate) > 0 {
-	//     certPath := filepath.Join(a.config.DataDir, "certs", "node.crt")
-	//     if err := os.WriteFile(certPath, resp.Certificate, 0600); err != nil {
-	//         return fmt.Errorf("failed to save certificate: %w", err)
-	//     }
-	//     a.logger.Info("Node certificate saved", zap.String("path", certPath))
-	// }
+	// Create certificates directory
+	certsDir := filepath.Join(a.config.DataDir, "certs")
+	if err := os.MkdirAll(certsDir, 0700); err != nil {
+		return fmt.Errorf("failed to create certs directory: %w", err)
+	}
 
-	// TODO: Store CA certificate
-	// if len(resp.CaCertificate) > 0 {
-	//     caPath := filepath.Join(a.config.DataDir, "certs", "ca.crt")
-	//     if err := os.WriteFile(caPath, resp.CaCertificate, 0600); err != nil {
-	//         return fmt.Errorf("failed to save CA certificate: %w", err)
-	//     }
-	//     a.logger.Info("CA certificate saved", zap.String("path", caPath))
-	// }
+	// Store received node certificate
+	if len(resp.Certificate) > 0 {
+		certPath := filepath.Join(certsDir, "node.crt")
+		if err := os.WriteFile(certPath, resp.Certificate, 0600); err != nil {
+			return fmt.Errorf("failed to save certificate: %w", err)
+		}
+		a.logger.Info("Node certificate saved", zap.String("path", certPath))
 
-	// TODO: Update heartbeat interval from response
-	// if resp.HeartbeatInterval != nil {
-	//     a.config.HeartbeatInterval = resp.HeartbeatInterval.AsDuration()
-	//     a.logger.Info("Updated heartbeat interval",
-	//         zap.Duration("interval", a.config.HeartbeatInterval),
-	//     )
-	// }
+		// Also save the key if provided
+		if len(resp.PrivateKey) > 0 {
+			keyPath := filepath.Join(certsDir, "node.key")
+			if err := os.WriteFile(keyPath, resp.PrivateKey, 0600); err != nil {
+				return fmt.Errorf("failed to save private key: %w", err)
+			}
+			a.logger.Info("Node private key saved", zap.String("path", keyPath))
+		}
+	}
+
+	// Store CA certificate
+	if len(resp.CaCertificate) > 0 {
+		caPath := filepath.Join(certsDir, "ca.crt")
+		if err := os.WriteFile(caPath, resp.CaCertificate, 0600); err != nil {
+			return fmt.Errorf("failed to save CA certificate: %w", err)
+		}
+		a.logger.Info("CA certificate saved", zap.String("path", caPath))
+	}
+
+	// Update heartbeat interval from response
+	if resp.HeartbeatInterval != nil {
+		a.config.HeartbeatInterval = resp.HeartbeatInterval.AsDuration()
+		a.logger.Info("Updated heartbeat interval",
+			zap.Duration("interval", a.config.HeartbeatInterval),
+		)
+	}
 
 	return nil
 }
@@ -593,21 +614,17 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 		Conditions: conditions,
 	}
 
-	// TODO: Once protobuf is generated, call:
-	// resp, err := a.coordinatorClient.Heartbeat(ctx, heartbeatReq)
-	// if err != nil {
-	//     return fmt.Errorf("heartbeat RPC failed: %w", err)
-	// }
-	//
-	// return a.processHeartbeatResponse(ctx, resp)
+	// Create coordinator client
+	coordinatorClient := api.NewCoordinatorServiceClient(a.coordinatorConn)
 
-	// For now, just log that we would send the request
-	a.logger.Debug("Heartbeat prepared (waiting for protobuf generation)",
-		zap.Int("container_count", len(containerInfos)),
-		zap.Int("condition_count", len(conditions)),
-	)
+	// Send heartbeat RPC
+	resp, err := coordinatorClient.Heartbeat(ctx, heartbeatReq)
+	if err != nil {
+		return fmt.Errorf("heartbeat RPC failed: %w", err)
+	}
 
-	return nil
+	// Process heartbeat response
+	return a.processHeartbeatResponse(ctx, resp)
 }
 
 // computeNodeConditions computes node health conditions

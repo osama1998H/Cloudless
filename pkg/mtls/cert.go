@@ -347,6 +347,11 @@ func (cm *CertificateManager) StopRotation() {
 	close(cm.stopCh)
 }
 
+// GetCACertificate returns the CA certificate PEM
+func (cm *CertificateManager) GetCACertificate() []byte {
+	return cm.ca.GetCACertificate()
+}
+
 // rotateExpiredCertificates checks and rotates expired certificates
 func (cm *CertificateManager) rotateExpiredCertificates() {
 	cm.mu.RLock()

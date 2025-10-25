@@ -260,6 +260,23 @@ func (s *Store) GetAll() (map[string][]byte, error) {
 	return s.fsm.GetAll()
 }
 
+// ListKeys returns all keys with the given prefix
+func (s *Store) ListKeys(prefix string) ([]string, error) {
+	all, err := s.GetAll()
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]string, 0)
+	for key := range all {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, nil
+}
+
 // Join adds a server to the cluster
 func (s *Store) Join(nodeID, addr string) error {
 	s.logger.Info("Received join request",

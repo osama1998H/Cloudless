@@ -335,10 +335,14 @@ func (m *Manager) EnrollNode(ctx context.Context, req *api.EnrollNodeRequest) (*
 	// Create response with proper duration
 	heartbeatDuration := durationpb.New(DefaultHeartbeatInterval)
 
+	// Get CA certificate from certificate manager
+	caCertPEM := m.certManager.GetCACertificate()
+
 	response := &api.EnrollNodeResponse{
 		NodeId:            nodeID,
 		Certificate:       cert.CertPEM,
-		CaCertificate:     []byte{}, // TODO: Add CA certificate
+		PrivateKey:        cert.KeyPEM,
+		CaCertificate:     caCertPEM,
 		HeartbeatInterval: heartbeatDuration,
 	}
 
