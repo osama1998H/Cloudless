@@ -497,9 +497,162 @@ go test -v -tags=chaos ./test/chaos/...
 
 These targets drive architectural decisions (RAFT for HA, QUIC for low-latency networking, weighted scoring for fast decisions).
 
+## Go Engineering Standards
+
+### GO_ENGINEERING_SOP.md
+
+**Location:** `/GO_ENGINEERING_SOP.md`
+
+**Purpose:** Comprehensive Standard Operating Procedure for Go development on Cloudless
+
+**When to Use:**
+- 📋 **Before starting work** - Review relevant sections for the component you're working on
+- 🔍 **During code review** - Reference standards for review feedback
+- 🐛 **When debugging** - Consult debugging checklists and patterns
+- ✅ **Before submitting PR** - Use checklists to ensure compliance
+- 🚀 **Before release** - Follow release management procedures
+
+**Key Sections by Task:**
+
+| **Your Task** | **Consult These Sections** | **Why** |
+|---------------|---------------------------|---------|
+| Adding new package | §2 (Repository Layout), §26.1 (New Package Checklist) | Ownership, structure, documentation requirements |
+| Writing concurrent code | §5 (Concurrency Policy), §26.3 (Concurrency Checklist) | Goroutine lifecycle, channel ownership, deadlock prevention |
+| Adding gRPC RPC | §6 (Networking), §11 (API Compatibility), §26.2 (RPC Checklist) | Context handling, error codes, idempotency, tracing |
+| Implementing storage | §7 (Storage Standards) | Durability, checksums, replication, garbage collection |
+| Security-sensitive code | §8 (Security Requirements) | mTLS, secrets, input validation, policy enforcement |
+| Adding metrics/logging | §9 (Observability) | Structured logging, Prometheus metrics, OpenTelemetry tracing |
+| Writing tests | §12 (Testing Policy), test/ structure | Unit, integration, chaos, benchmark test guidelines |
+| Performance optimization | §13 (Performance), profiling | Performance targets, profiling, memory management |
+| Preparing for release | §17 (Release Management), §26.4 (Release Checklist) | Versioning, canary deployments, rollback procedures |
+| On-call debugging | §18 (Runbooks), §24 (Triage) | Incident response, common issues, debugging workflows |
+
+**CLAUDE.md vs GO_ENGINEERING_SOP.md:**
+
+| Use **CLAUDE.md** when... | Use **GO_ENGINEERING_SOP.md** when... |
+|--------------------------|--------------------------------------|
+| Understanding architecture | Learning coding standards |
+| Quick context for AI assistance | Writing production code |
+| Finding where code lives | Understanding how to write code |
+| Debugging specific components | Following development procedures |
+| Understanding recent changes | Reviewing code quality requirements |
+| Setting up local development | Understanding CI/CD pipeline |
+
+**Critical Reminders from SOP:**
+
+1. **Concurrency** (§5)
+   - NO unbounded goroutines - use worker pools or semaphores
+   - Context cancellation - respect `ctx.Done()`
+   - Channels - sender closes, document ownership
+   - Run tests with `-race` detector
+
+2. **Error Handling** (§4)
+   - Check errors immediately
+   - Use `fmt.Errorf` with `%w` for wrapping
+   - Define sentinel errors for expected conditions
+   - NEVER panic in library code
+
+3. **Security** (§8)
+   - mTLS everywhere - NO plaintext communication
+   - Validate ALL external input
+   - NEVER hardcode secrets
+   - Use policy engine for admission control
+
+4. **Observability** (§9)
+   - Structured logging with `zap`
+   - Prometheus metrics for all operations
+   - OpenTelemetry tracing for distributed calls
+   - Follow metric naming conventions
+
+5. **Testing** (§12)
+   - Minimum 70% statement coverage
+   - Use build tags: `//go:build benchmark|integration|chaos`
+   - Table-driven tests for multiple scenarios
+   - Run with race detector in CI
+
+6. **Performance** (§13)
+   - Scheduler: 200ms P50, 800ms P95
+   - Membership: 5s P50, 15s P95
+   - Profile with pprof before optimizing
+   - Avoid allocations in hot paths
+
+**Quick Decision Guide:**
+
+```
+┌─────────────────────────────────────────┐
+│ Need to understand the codebase?       │
+│ → Read CLAUDE.md                        │
+└─────────────────────────────────────────┘
+                    │
+┌─────────────────────────────────────────┐
+│ Need to write/review code?             │
+│ → Follow GO_ENGINEERING_SOP.md          │
+└─────────────────────────────────────────┘
+                    │
+┌─────────────────────────────────────────┐
+│ Need product requirements?              │
+│ → Read Cloudless.md (PRD)               │
+└─────────────────────────────────────────┘
+```
+
+**Example Workflow:**
+
+1. **Receive task:** "Add new scheduler plugin for GPU affinity"
+2. **Read CLAUDE.md §Scheduler** → Understand architecture
+3. **Read Cloudless.md CLD-REQ-020** → Understand requirements
+4. **Read GO_ENGINEERING_SOP.md §26.1** → New package checklist
+5. **Read GO_ENGINEERING_SOP.md §12** → Testing requirements
+6. **Implement** following standards from SOP
+7. **Review** using §15 (Code Review) checklist
+8. **Submit PR** with all checklist items complete
+
+**Test Structure Reference:**
+
+As of the recent test restructuring (see test/ directory):
+- **Unit tests:** Co-located with source (`pkg/*/\*_test.go`)
+- **Shared utilities:** `test/testutil/` (helpers, mocks, fixtures)
+- **Integration tests:** `test/integration/` (build tag: `integration`)
+- **Chaos tests:** `test/chaos/` (build tag: `chaos`)
+- **Benchmarks:** Tagged with `//go:build benchmark`
+
+Run tests:
+```bash
+# Unit tests (default)
+make test
+
+# Integration tests
+make test-integration  # or: go test -tags=integration ./test/integration/...
+
+# Chaos tests
+make test-chaos  # or: go test -tags=chaos ./test/chaos/...
+
+# Benchmarks
+make benchmark  # or: go test -tags=benchmark -bench=. ./pkg/...
+```
+
+**Enforcement:**
+
+The SOP is enforced through:
+- ✅ **CI pipeline** - Automated checks for formatting, linting, tests
+- 👥 **Code review** - Reviewers use SOP as checklist
+- 📊 **Metrics** - Track coverage, performance regressions
+- 🔒 **Security scans** - gosec, dependency vulnerabilities
+- 📝 **PR template** - Reminds contributors of requirements
+
+**Updates:**
+
+The SOP follows semantic versioning (currently v1.0). If you find:
+- Outdated information
+- Missing guidance
+- Contradictions with current practices
+
+Please submit a PR to update GO_ENGINEERING_SOP.md.
+
 ## Getting Help
 
 - **GitHub Issues**: https://github.com/osama1998H/Cloudless/issues
 - **README.md**: User-facing quick start and feature list
 - **Makefile**: Run `make help` for all available commands
-- **This File**: Architecture context and non-obvious patterns
+- **CLAUDE.md (this file)**: Architecture context and non-obvious patterns
+- **GO_ENGINEERING_SOP.md**: Engineering standards and procedures
+- **Cloudless.md**: Product requirements and design goals
