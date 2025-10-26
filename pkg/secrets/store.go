@@ -121,7 +121,7 @@ func (s *RaftSecretStore) List(filter SecretFilter) ([]*Secret, error) {
 	// Filter secrets from cache
 	secrets := make([]*Secret, 0)
 
-	for key, secret := range s.cache {
+	for _, secret := range s.cache {
 		// Apply namespace filter
 		if filter.Namespace != "" && secret.Namespace != filter.Namespace {
 			continue

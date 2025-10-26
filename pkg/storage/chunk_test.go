@@ -393,12 +393,23 @@ func TestChunkStore_GarbageCollect(t *testing.T) {
 
 func TestChunkStore_GetChunkPath(t *testing.T) {
 	logger := zap.NewNop()
+
+	// Create a temporary directory for testing
+	tmpDir, err := os.MkdirTemp("", "cloudless-test-chunks-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	config := StorageConfig{
-		DataDir:           "/test/data",
+		DataDir:           tmpDir,
 		EnableCompression: false,
 	}
 
-	cs, _ := NewChunkStore(config, logger)
+	cs, err := NewChunkStore(config, logger)
+	if err != nil {
+		t.Fatalf("Failed to create chunk store: %v", err)
+	}
 
 	tests := []struct {
 		chunkID      string
@@ -406,15 +417,15 @@ func TestChunkStore_GetChunkPath(t *testing.T) {
 	}{
 		{
 			chunkID:      "abcdef1234567890",
-			expectedPath: filepath.Join("/test/data", "chunks", "ab", "abcdef1234567890"),
+			expectedPath: filepath.Join(tmpDir, "chunks", "ab", "abcdef1234567890"),
 		},
 		{
 			chunkID:      "a",
-			expectedPath: filepath.Join("/test/data", "chunks", "a"),
+			expectedPath: filepath.Join(tmpDir, "chunks", "a"),
 		},
 		{
 			chunkID:      "123456789",
-			expectedPath: filepath.Join("/test/data", "chunks", "12", "123456789"),
+			expectedPath: filepath.Join(tmpDir, "chunks", "12", "123456789"),
 		},
 	}
 

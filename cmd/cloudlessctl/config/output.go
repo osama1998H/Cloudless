@@ -51,8 +51,13 @@ func (o *Outputter) Print(data interface{}) error {
 // PrintTable prints data as a table
 func (o *Outputter) PrintTable(headers []string, rows [][]string) {
 	table := tablewriter.NewWriter(o.writer)
-	table.SetAutoWrapText(false)
-	table.SetBorder(false)
+
+	// Convert []string to []any for Header
+	headerAny := make([]any, len(headers))
+	for i, h := range headers {
+		headerAny[i] = h
+	}
+	table.Header(headerAny...)
 
 	for _, row := range rows {
 		table.Append(row)

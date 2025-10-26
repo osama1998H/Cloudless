@@ -79,7 +79,7 @@ func (c *Coordinator) AdmitWorkload(ctx context.Context, workload *api.Workload)
 				i+1, violation.Severity, violation.RuleName, violation.Message)
 		}
 
-		return status.Errorf(codes.PermissionDenied, errMsg)
+		return status.Errorf(codes.PermissionDenied, "%s", errMsg)
 	}
 
 	return nil
