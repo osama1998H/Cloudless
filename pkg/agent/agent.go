@@ -652,8 +652,17 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 	}
 
 	// Prepare heartbeat request
+	// CLD-REQ-010: Include both capacity (available resources) and usage (consumed resources)
 	heartbeatReq := &api.HeartbeatRequest{
 		NodeId: a.config.NodeID,
+		Capacity: &api.ResourceCapacity{
+			CpuMillicores: capacity.CPUMillicores,
+			MemoryBytes:   capacity.MemoryBytes,
+			StorageBytes:  capacity.StorageBytes,
+			BandwidthBps:  capacity.BandwidthBPS, // CLD-REQ-010: Egress bandwidth
+			GpuCount:      int32(capacity.GPUCount),
+			IopsClass:     capacity.IOPSClass, // CLD-REQ-010: IOPS classification
+		},
 		Usage: &api.ResourceUsage{
 			CpuMillicores: usage.CPUMillicores,
 			MemoryBytes:   usage.MemoryBytes,

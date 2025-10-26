@@ -157,12 +157,14 @@ message NodeCapabilities {
 }
 
 // ResourceCapacity represents total resources
+// CLD-REQ-010: Reports CPU (millicores), RAM (MiB via bytes), storage (GiB via bytes), IOPS class, egress bandwidth (Mbps via bps)
 message ResourceCapacity {
   int64 cpu_millicores = 1;
   int64 memory_bytes = 2;
   int64 storage_bytes = 3;
   int64 bandwidth_bps = 4;
   int32 gpu_count = 5;
+  string iops_class = 6;  // IOPS class: "low", "medium", "high", "premium", or "unknown"
 }
 
 // ResourceUsage represents current resource usage
@@ -435,11 +437,13 @@ message EnrollNodeResponse {
   google.protobuf.Duration heartbeat_interval = 4;
 }
 
+// CLD-REQ-010: Heartbeat reports both capacity (available resources) and usage (consumed resources)
 message HeartbeatRequest {
   string node_id = 1;
-  ResourceUsage usage = 2;
-  repeated Fragment fragments = 3;
-  repeated ContainerStatus containers = 4;
+  ResourceCapacity capacity = 2;  // Available capacity for scheduling
+  ResourceUsage usage = 3;         // Current resource usage
+  repeated Fragment fragments = 4;
+  repeated ContainerStatus containers = 5;
 }
 
 message HeartbeatResponse {
