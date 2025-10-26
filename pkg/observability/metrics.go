@@ -180,6 +180,23 @@ var (
 		},
 		[]string{"result"}, // success, failure
 	)
+
+	// CLD-REQ-002: Membership convergence timing metrics
+	MembershipJoinConvergenceSeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_membership_join_convergence_seconds",
+			Help:    "Time for a node join to converge cluster-wide (CLD-REQ-002: P50 < 5s, P95 < 15s)",
+			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0},
+		},
+	)
+
+	MembershipLeaveConvergenceSeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_membership_leave_convergence_seconds",
+			Help:    "Time for a node leave to converge cluster-wide (CLD-REQ-002: P50 < 5s, P95 < 15s)",
+			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0},
+		},
+	)
 )
 
 // Workload Metrics
