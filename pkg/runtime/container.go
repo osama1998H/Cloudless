@@ -25,14 +25,17 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 		zap.String("image", spec.Image),
 	)
 
+	// Normalize image reference (same as in PullImage)
+	normalizedRef := normalizeImageRef(spec.Image)
+
 	// Pull image if not present
-	image, err := r.client.GetImage(ctx, spec.Image)
+	image, err := r.client.GetImage(ctx, normalizedRef)
 	if err != nil {
 		r.logger.Info("Image not found, pulling...", zap.String("image", spec.Image))
 		if err := r.PullImage(ctx, spec.Image); err != nil {
 			return nil, fmt.Errorf("failed to pull image: %w", err)
 		}
-		image, err = r.client.GetImage(ctx, spec.Image)
+		image, err = r.client.GetImage(ctx, normalizedRef)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get image after pull: %w", err)
 		}

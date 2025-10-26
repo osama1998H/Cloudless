@@ -1,0 +1,46 @@
+# Containerd configuration for Cloudless agents
+# This config enables pulling images from public registries in Docker-in-Docker environments
+
+version = 2
+
+# Root directory for containerd metadata
+root = "/var/lib/containerd"
+
+# State directory for execution state
+state = "/run/containerd"
+
+# GRPC configuration
+[grpc]
+  address = "/run/containerd/containerd.sock"
+  uid = 0
+  gid = 0
+
+# Plugin configuration
+[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    # CRI plugin configuration
+    sandbox_image = "registry.k8s.io/pause:3.8"
+
+    # Registry configuration - enables pulling from public registries
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      # Registry mirrors for Docker Hub and other registries
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+          endpoint = ["https://registry-1.docker.io"]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."gcr.io"]
+          endpoint = ["https://gcr.io"]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."ghcr.io"]
+          endpoint = ["https://ghcr.io"]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."quay.io"]
+          endpoint = ["https://quay.io"]
+
+      # Registry configuration for authentication (if needed)
+      [plugins."io.containerd.grpc.v1.cri".registry.configs]
+        # Add registry-specific configs here if authentication is required
+        # Example:
+        # [plugins."io.containerd.grpc.v1.cri".registry.configs."docker.io".auth]
+        #   username = ""
+        #   password = ""
+
+  [plugins."io.containerd.snapshotter.v1.overlayfs"]
+    root_path = "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs"

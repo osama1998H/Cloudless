@@ -1111,9 +1111,19 @@ func (a *Agent) runWorkload(ctx context.Context, workload *api.Workload, fragmen
 		}
 	}
 
+	// Construct container ID - ensure it always starts with alphanumeric
+	// to satisfy containerd's regex: ^[A-Za-z0-9]+(?:[._-](?:[A-Za-z0-9]+))*$
+	var containerID string
+	if workload.Id != "" {
+		containerID = fmt.Sprintf("%s-%s", workload.Id, fragmentID)
+	} else {
+		// Fallback: use fragment ID directly if workload ID is empty
+		containerID = fragmentID
+	}
+
 	// Create container spec
 	containerSpec := runtime.ContainerSpec{
-		ID:      fmt.Sprintf("%s-%s", workload.Id, fragmentID),
+		ID:      containerID,
 		Image:   spec.Image,
 		Name:    fmt.Sprintf("%s-%s-%s", workload.Namespace, workload.Name, fragmentID),
 		Command: spec.Command,

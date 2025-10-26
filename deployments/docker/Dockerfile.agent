@@ -48,6 +48,9 @@ COPY --from=builder /build/agent /usr/local/bin/agent
 # Copy default configuration
 COPY config/agent.yaml /etc/cloudless/agent.yaml
 
+# Copy containerd configuration for registry access
+COPY deployments/docker/config/containerd.toml /etc/containerd/config.toml
+
 # Copy entrypoint script
 COPY deployments/docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 RUN chmod +x /usr/local/bin/agent-entrypoint.sh

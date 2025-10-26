@@ -3,8 +3,8 @@ set -e
 
 echo "Starting containerd daemon..."
 
-# Start containerd in the background
-containerd &
+# Start containerd in the background with config file
+containerd --config /etc/containerd/config.toml &
 CONTAINERD_PID=$!
 
 # Wait for containerd to be ready

@@ -31,7 +31,8 @@
       "Bash(go test:*)",
       "Bash(gofmt:*)",
       "Bash(make build:*)",
-      "Bash(GOOS=linux GOARCH=amd64 go build:*)"
+      "Bash(GOOS=linux GOARCH=amd64 go build:*)",
+      "Bash(./build/cloudlessctl workload create:*)"
     ],
     "deny": [],
     "ask": []

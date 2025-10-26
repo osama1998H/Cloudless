@@ -304,6 +304,8 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 	if workloadID == "" {
 		workloadID = fmt.Sprintf("%s-%s", workload.Namespace, workload.Name)
 	}
+	// Persist the generated ID back to the workload
+	workload.Id = workloadID
 
 	// Convert API volumes to state manager format
 	volumes := make([]VolumeMount, 0, len(spec.Volumes))
@@ -453,6 +455,11 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		c.workloadStateMgr.SaveWorkload(ctx, workloadState)
 
 		return nil, fmt.Errorf("failed to schedule workload: %w", err)
+	}
+
+	// Ensure workload ID is set (defensive check)
+	if workload.Id == "" {
+		workload.Id = workloadID
 	}
 
 	// Queue assignments for each node
