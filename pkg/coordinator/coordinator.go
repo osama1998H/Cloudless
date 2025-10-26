@@ -116,7 +116,7 @@ type Coordinator struct {
 
 	// Overlay networking components
 	transport       *overlay.QUICTransport
-	serviceRegistry *overlay.ServiceRegistry
+	serviceRegistry *overlay.PersistentServiceRegistry
 	loadBalancer    *overlay.L4LoadBalancer
 	peerManager     *overlay.PeerManager
 	meshManager     *overlay.MeshManager
@@ -330,8 +330,11 @@ func New(config *Config) (*Coordinator, error) {
 	)
 	c.transport = transport
 
-	// Initialize service registry
-	serviceRegistry, err := overlay.NewServiceRegistry(
+	// Initialize service registry with RAFT persistence (CLD-REQ-041)
+	ctx := context.Background()
+	serviceRegistry, err := overlay.NewPersistentServiceRegistry(
+		ctx,
+		raftStore,
 		config.OverlayConfig.Registry,
 		config.Logger,
 	)
@@ -340,10 +343,10 @@ func New(config *Config) (*Coordinator, error) {
 	}
 	c.serviceRegistry = serviceRegistry
 
-	// Initialize load balancer
+	// Initialize load balancer (uses embedded ServiceRegistry)
 	loadBalancer := overlay.NewL4LoadBalancer(
 		config.OverlayConfig.LoadBalancer,
-		serviceRegistry,
+		serviceRegistry.ServiceRegistry,
 		config.Logger,
 	)
 	c.loadBalancer = loadBalancer
@@ -595,8 +598,8 @@ func (c *Coordinator) ScheduleWorkload(ctx context.Context, spec scheduler.Workl
 
 // Overlay Networking Methods
 
-// GetServiceRegistry returns the service registry
-func (c *Coordinator) GetServiceRegistry() *overlay.ServiceRegistry {
+// GetServiceRegistry returns the persistent service registry
+func (c *Coordinator) GetServiceRegistry() *overlay.PersistentServiceRegistry {
 	return c.serviceRegistry
 }
 

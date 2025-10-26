@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/observability"
 	"go.uber.org/zap"
 )
 
@@ -38,18 +39,29 @@ func NewServiceRegistry(config RegistryConfig, logger *zap.Logger) (*ServiceRegi
 
 // RegisterService registers a new service
 func (sr *ServiceRegistry) RegisterService(service *Service) error {
+	start := time.Now()
+	defer func() {
+		observability.RegistryOperationDuration.WithLabelValues("register_service").Observe(time.Since(start).Seconds())
+	}()
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
+	namespace := service.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+
 	sr.logger.Info("Registering service",
 		zap.String("name", service.Name),
-		zap.String("namespace", service.Namespace),
+		zap.String("namespace", namespace),
 	)
 
 	// Allocate virtual IP if not provided
 	if service.VirtualIP == "" {
 		ip, err := sr.ipPool.Allocate()
 		if err != nil {
+			observability.RegistryServiceRegistrations.WithLabelValues(namespace, "failure").Inc()
 			return fmt.Errorf("failed to allocate virtual IP: %w", err)
 		}
 		service.VirtualIP = ip
@@ -62,13 +74,26 @@ func (sr *ServiceRegistry) RegisterService(service *Service) error {
 	sr.services.Store(fullName, service)
 	sr.virtualIPs.Store(fullName, service.VirtualIP)
 
+	// Update metrics
+	observability.RegistryServiceRegistrations.WithLabelValues(namespace, "success").Inc()
+	observability.RegistryServicesTotal.WithLabelValues(namespace).Inc()
+
 	return nil
 }
 
 // DeregisterService removes a service
 func (sr *ServiceRegistry) DeregisterService(name, namespace string) error {
+	start := time.Now()
+	defer func() {
+		observability.RegistryOperationDuration.WithLabelValues("deregister_service").Observe(time.Since(start).Seconds())
+	}()
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+
+	if namespace == "" {
+		namespace = "default"
+	}
 
 	fullName := sr.getFullServiceName(name, namespace)
 
@@ -85,6 +110,10 @@ func (sr *ServiceRegistry) DeregisterService(name, namespace string) error {
 
 	sr.services.Delete(fullName)
 	sr.endpoints.Delete(fullName)
+
+	// Update metrics
+	observability.RegistryServiceDeregistrations.WithLabelValues(namespace).Inc()
+	observability.RegistryServicesTotal.WithLabelValues(namespace).Dec()
 
 	return nil
 }
@@ -116,8 +145,17 @@ func (sr *ServiceRegistry) ListServices() []*Service {
 
 // RegisterEndpoint registers an endpoint for a service
 func (sr *ServiceRegistry) RegisterEndpoint(serviceName, namespace string, endpoint Endpoint) error {
+	start := time.Now()
+	defer func() {
+		observability.RegistryOperationDuration.WithLabelValues("register_endpoint").Observe(time.Since(start).Seconds())
+	}()
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+
+	if namespace == "" {
+		namespace = "default"
+	}
 
 	fullName := sr.getFullServiceName(serviceName, namespace)
 
@@ -129,6 +167,7 @@ func (sr *ServiceRegistry) RegisterEndpoint(serviceName, namespace string, endpo
 
 	// Get existing endpoints
 	var endpoints []Endpoint
+	isUpdate := false
 	if e, ok := sr.endpoints.Load(fullName); ok {
 		endpoints = e.([]Endpoint)
 	}
@@ -137,15 +176,29 @@ func (sr *ServiceRegistry) RegisterEndpoint(serviceName, namespace string, endpo
 	for i, ep := range endpoints {
 		if ep.ID == endpoint.ID {
 			// Update existing endpoint
+			oldHealth := endpoints[i].Health
 			endpoints[i] = endpoint
 			sr.endpoints.Store(fullName, endpoints)
-			return nil
+
+			// Update endpoint health metric if health changed
+			if oldHealth != endpoint.Health {
+				observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(oldHealth)).Dec()
+				observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(endpoint.Health)).Inc()
+			}
+			isUpdate = true
+			break
 		}
 	}
 
-	// Add new endpoint
-	endpoints = append(endpoints, endpoint)
-	sr.endpoints.Store(fullName, endpoints)
+	if !isUpdate {
+		// Add new endpoint
+		endpoints = append(endpoints, endpoint)
+		sr.endpoints.Store(fullName, endpoints)
+
+		// Update metrics for new endpoint
+		observability.RegistryEndpointRegistrations.WithLabelValues(serviceName, namespace).Inc()
+		observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(endpoint.Health)).Inc()
+	}
 
 	// Update service timestamp
 	if s, ok := sr.services.Load(fullName); ok {
@@ -159,8 +212,17 @@ func (sr *ServiceRegistry) RegisterEndpoint(serviceName, namespace string, endpo
 
 // DeregisterEndpoint removes an endpoint from a service
 func (sr *ServiceRegistry) DeregisterEndpoint(serviceName, namespace, endpointID string) error {
+	start := time.Now()
+	defer func() {
+		observability.RegistryOperationDuration.WithLabelValues("deregister_endpoint").Observe(time.Since(start).Seconds())
+	}()
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+
+	if namespace == "" {
+		namespace = "default"
+	}
 
 	fullName := sr.getFullServiceName(serviceName, namespace)
 
@@ -174,8 +236,11 @@ func (sr *ServiceRegistry) DeregisterEndpoint(serviceName, namespace, endpointID
 		endpoints := e.([]Endpoint)
 		newEndpoints := make([]Endpoint, 0, len(endpoints))
 
+		var removedHealth HealthStatus
 		for _, ep := range endpoints {
-			if ep.ID != endpointID {
+			if ep.ID == endpointID {
+				removedHealth = ep.Health
+			} else {
 				newEndpoints = append(newEndpoints, ep)
 			}
 		}
@@ -184,6 +249,11 @@ func (sr *ServiceRegistry) DeregisterEndpoint(serviceName, namespace, endpointID
 			sr.endpoints.Store(fullName, newEndpoints)
 		} else {
 			sr.endpoints.Delete(fullName)
+		}
+
+		// Update metrics if endpoint was removed
+		if len(newEndpoints) < len(endpoints) {
+			observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(removedHealth)).Dec()
 		}
 	}
 
@@ -221,8 +291,17 @@ func (sr *ServiceRegistry) GetHealthyEndpoints(serviceName, namespace string) ([
 
 // UpdateEndpointHealth updates the health status of an endpoint
 func (sr *ServiceRegistry) UpdateEndpointHealth(serviceName, namespace, endpointID string, health HealthStatus) error {
+	start := time.Now()
+	defer func() {
+		observability.RegistryOperationDuration.WithLabelValues("update_endpoint_health").Observe(time.Since(start).Seconds())
+	}()
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+
+	if namespace == "" {
+		namespace = "default"
+	}
 
 	fullName := sr.getFullServiceName(serviceName, namespace)
 
@@ -231,8 +310,17 @@ func (sr *ServiceRegistry) UpdateEndpointHealth(serviceName, namespace, endpoint
 
 		for i, ep := range endpoints {
 			if ep.ID == endpointID {
+				oldHealth := endpoints[i].Health
 				endpoints[i].Health = health
 				sr.endpoints.Store(fullName, endpoints)
+
+				// Update metrics
+				if oldHealth != health {
+					observability.RegistryEndpointHealthTransitions.WithLabelValues(string(oldHealth), string(health)).Inc()
+					observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(oldHealth)).Dec()
+					observability.RegistryEndpointsTotal.WithLabelValues(serviceName, namespace, string(health)).Inc()
+				}
+
 				return nil
 			}
 		}
@@ -303,11 +391,19 @@ func NewIPPool(cidr string) (*IPPool, error) {
 		return nil, fmt.Errorf("invalid CIDR: %w", err)
 	}
 
+	// Determine starting offset based on subnet size
+	startOffset := uint32(1) // Default: skip network address
+	ones, bits := network.Mask.Size()
+	if bits-ones == 1 {
+		// /31 subnet - both addresses are usable (RFC 3021)
+		startOffset = 0
+	}
+
 	return &IPPool{
 		cidr:       cidr,
 		network:    network,
 		allocated:  make(map[string]bool),
-		nextOffset: 1, // Skip network address
+		nextOffset: startOffset,
 	}, nil
 }
 
@@ -324,21 +420,37 @@ func (pool *IPPool) Allocate() (string, error) {
 
 	networkUint := ipToUint32(networkIP)
 	ones, bits := pool.network.Mask.Size()
-	maxHosts := uint32(1<<uint(bits-ones)) - 2 // Subtract network and broadcast
+	totalAddresses := uint32(1 << uint(bits-ones))
 
-	// Find next available IP
+	// For /31 subnets (point-to-point links per RFC 3021), all IPs are usable
+	// For other subnets, skip network (offset 0) and broadcast (last address)
+	startOffset := uint32(1)
+	endOffset := totalAddresses - 1
+
+	if bits-ones == 1 {
+		// /31 subnet - both addresses are usable (RFC 3021)
+		startOffset = 0
+		endOffset = totalAddresses
+	}
+
+	maxHosts := endOffset - startOffset
+
+	// Find next available IP, starting from nextOffset and wrapping around
 	for i := uint32(0); i < maxHosts; i++ {
-		offset := (pool.nextOffset + i) % maxHosts
-		if offset == 0 {
-			offset = 1 // Skip network address
-		}
+		// Calculate offset with wraparound
+		offset := startOffset + ((pool.nextOffset - startOffset + i) % maxHosts)
 
 		ip := uint32ToIP(networkUint + offset)
 		ipStr := ip.String()
 
 		if !pool.allocated[ipStr] {
 			pool.allocated[ipStr] = true
-			pool.nextOffset = offset + 1
+			// Update nextOffset for next allocation, ensuring it stays within bounds
+			pool.nextOffset = startOffset + ((offset - startOffset + 1) % maxHosts)
+
+			// Update metrics
+			pool.updatePoolMetrics(maxHosts)
+
 			return ipStr, nil
 		}
 	}
@@ -352,6 +464,34 @@ func (pool *IPPool) Release(ip string) {
 	defer pool.mu.Unlock()
 
 	delete(pool.allocated, ip)
+
+	// Update metrics
+	ones, bits := pool.network.Mask.Size()
+	totalAddresses := uint32(1 << uint(bits-ones))
+
+	var maxHosts uint32
+	if bits-ones == 1 {
+		// /31 subnet
+		maxHosts = totalAddresses
+	} else {
+		maxHosts = totalAddresses - 2
+	}
+
+	pool.updatePoolMetrics(maxHosts)
+}
+
+// updatePoolMetrics updates Prometheus metrics for the IP pool (caller must hold lock)
+func (pool *IPPool) updatePoolMetrics(poolSize uint32) {
+	allocated := uint32(len(pool.allocated))
+
+	observability.RegistryVIPPoolSize.Set(float64(poolSize))
+	observability.RegistryVIPPoolAllocated.Set(float64(allocated))
+
+	var utilization float64
+	if poolSize > 0 {
+		utilization = float64(allocated) / float64(poolSize)
+	}
+	observability.RegistryVIPPoolUtilization.Set(utilization)
 }
 
 // ipToUint32 converts an IP address to uint32

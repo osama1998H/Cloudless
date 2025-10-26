@@ -380,6 +380,91 @@ var (
 	)
 )
 
+// Service Registry Metrics
+var (
+	// Service operations
+	RegistryServicesTotal = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_registry_services_total",
+			Help: "Total number of registered services",
+		},
+		[]string{"namespace"},
+	)
+
+	RegistryServiceRegistrations = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_registry_service_registrations_total",
+			Help: "Total number of service registration operations",
+		},
+		[]string{"namespace", "result"}, // result: success, failure
+	)
+
+	RegistryServiceDeregistrations = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_registry_service_deregistrations_total",
+			Help: "Total number of service deregistration operations",
+		},
+		[]string{"namespace"},
+	)
+
+	// Endpoint operations
+	RegistryEndpointsTotal = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_registry_endpoints_total",
+			Help: "Total number of registered endpoints",
+		},
+		[]string{"service", "namespace", "health_status"}, // health_status: healthy, unhealthy, unknown
+	)
+
+	RegistryEndpointRegistrations = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_registry_endpoint_registrations_total",
+			Help: "Total number of endpoint registration operations",
+		},
+		[]string{"service", "namespace"},
+	)
+
+	RegistryEndpointHealthTransitions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_registry_endpoint_health_transitions_total",
+			Help: "Total number of endpoint health status transitions",
+		},
+		[]string{"from_status", "to_status"}, // healthy/unhealthy/unknown
+	)
+
+	// Virtual IP pool metrics
+	RegistryVIPPoolSize = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_registry_vip_pool_size",
+			Help: "Total number of IPs in the virtual IP pool",
+		},
+	)
+
+	RegistryVIPPoolAllocated = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_registry_vip_pool_allocated",
+			Help: "Number of currently allocated virtual IPs",
+		},
+	)
+
+	RegistryVIPPoolUtilization = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_registry_vip_pool_utilization_ratio",
+			Help: "Virtual IP pool utilization ratio (allocated/total)",
+		},
+	)
+
+	// Performance metrics
+	RegistryOperationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_registry_operation_duration_seconds",
+			Help:    "Duration of registry operations in seconds",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1},
+		},
+		[]string{"operation"}, // register_service, deregister_service, register_endpoint, etc.
+	)
+)
+
 // General System Metrics
 var (
 	SystemInfo = promauto.NewGaugeVec(
