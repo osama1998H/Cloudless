@@ -19,8 +19,8 @@ type Engine struct {
 	mu        sync.RWMutex
 
 	// Cache for evaluation results
-	cache     map[string]*cachedResult
-	cacheMu   sync.RWMutex
+	cache   map[string]*cachedResult
+	cacheMu sync.RWMutex
 }
 
 type cachedResult struct {

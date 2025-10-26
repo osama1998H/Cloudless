@@ -119,16 +119,16 @@ func NewMetricsStorage(config MetricsStorageConfig, logger *zap.Logger) *Metrics
 	}
 
 	ms := &MetricsStorage{
-		cpuMetrics:       make([]MetricDataPoint, 0, config.MaxDataPoints),
-		memoryMetrics:    make([]MetricDataPoint, 0, config.MaxDataPoints),
-		storageMetrics:   make([]MetricDataPoint, 0, config.MaxDataPoints),
-		bandwidthMetrics: make([]MetricDataPoint, 0, config.MaxDataPoints),
-		gpuMetrics:       make([]MetricDataPoint, 0, config.MaxDataPoints),
-		thresholds:       config.Thresholds,
-		alertHandlers:    make([]AlertHandler, 0),
+		cpuMetrics:        make([]MetricDataPoint, 0, config.MaxDataPoints),
+		memoryMetrics:     make([]MetricDataPoint, 0, config.MaxDataPoints),
+		storageMetrics:    make([]MetricDataPoint, 0, config.MaxDataPoints),
+		bandwidthMetrics:  make([]MetricDataPoint, 0, config.MaxDataPoints),
+		gpuMetrics:        make([]MetricDataPoint, 0, config.MaxDataPoints),
+		thresholds:        config.Thresholds,
+		alertHandlers:     make([]AlertHandler, 0),
 		retentionDuration: config.RetentionDuration,
-		maxDataPoints:    config.MaxDataPoints,
-		logger:           logger,
+		maxDataPoints:     config.MaxDataPoints,
+		logger:            logger,
 	}
 
 	return ms

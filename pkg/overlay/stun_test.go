@@ -23,8 +23,8 @@ func TestSTUNClient_NewSTUNClient(t *testing.T) {
 		expectedServers []string
 	}{
 		{
-			name:    "with custom servers",
-			servers: []string{"stun.example.com:3478", "stun2.example.com:3478"},
+			name:            "with custom servers",
+			servers:         []string{"stun.example.com:3478", "stun2.example.com:3478"},
 			expectedServers: []string{"stun.example.com:3478", "stun2.example.com:3478"},
 		},
 		{
@@ -89,43 +89,43 @@ func TestSTUNClient_DetectNATType(t *testing.T) {
 	client := NewSTUNClient([]string{"stun.example.com:3478"}, logger)
 
 	tests := []struct {
-		name           string
-		localIP        string
-		localPort      int
-		publicIP       string
-		publicPort     int
+		name            string
+		localIP         string
+		localPort       int
+		publicIP        string
+		publicPort      int
 		expectedNATType NATType
 	}{
 		{
-			name:           "no NAT - IPs match",
-			localIP:        "192.168.1.100",
-			localPort:      5000,
-			publicIP:       "192.168.1.100",
-			publicPort:     5000,
+			name:            "no NAT - IPs match",
+			localIP:         "192.168.1.100",
+			localPort:       5000,
+			publicIP:        "192.168.1.100",
+			publicPort:      5000,
 			expectedNATType: NATTypeNone,
 		},
 		{
-			name:           "full cone NAT - ports match",
-			localIP:        "192.168.1.100",
-			localPort:      5000,
-			publicIP:       "203.0.113.10",
-			publicPort:     5000,
+			name:            "full cone NAT - ports match",
+			localIP:         "192.168.1.100",
+			localPort:       5000,
+			publicIP:        "203.0.113.10",
+			publicPort:      5000,
 			expectedNATType: NATTypeFullCone,
 		},
 		{
-			name:           "port-restricted cone NAT - ports differ",
-			localIP:        "192.168.1.100",
-			localPort:      5000,
-			publicIP:       "203.0.113.10",
-			publicPort:     54321,
+			name:            "port-restricted cone NAT - ports differ",
+			localIP:         "192.168.1.100",
+			localPort:       5000,
+			publicIP:        "203.0.113.10",
+			publicPort:      54321,
 			expectedNATType: NATTypePortRestrictedCone,
 		},
 		{
-			name:           "port-restricted cone NAT - different IPs",
-			localIP:        "10.0.0.50",
-			localPort:      8000,
-			publicIP:       "198.51.100.20",
-			publicPort:     62000,
+			name:            "port-restricted cone NAT - different IPs",
+			localIP:         "10.0.0.50",
+			localPort:       8000,
+			publicIP:        "198.51.100.20",
+			publicPort:      62000,
 			expectedNATType: NATTypePortRestrictedCone,
 		},
 	}
@@ -145,39 +145,39 @@ func TestSTUNClient_DetectNATType(t *testing.T) {
 // TestParseAddress verifies address parsing helper function
 func TestParseAddress(t *testing.T) {
 	tests := []struct {
-		name        string
-		addr        string
-		expectedIP  string
+		name         string
+		addr         string
+		expectedIP   string
 		expectedPort int
-		expectError bool
+		expectError  bool
 	}{
 		{
-			name:        "valid IPv4 with port",
-			addr:        "192.168.1.100:5000",
-			expectedIP:  "192.168.1.100",
+			name:         "valid IPv4 with port",
+			addr:         "192.168.1.100:5000",
+			expectedIP:   "192.168.1.100",
 			expectedPort: 5000,
-			expectError: false,
+			expectError:  false,
 		},
 		{
-			name:        "localhost with port",
-			addr:        "127.0.0.1:8080",
-			expectedIP:  "127.0.0.1",
+			name:         "localhost with port",
+			addr:         "127.0.0.1:8080",
+			expectedIP:   "127.0.0.1",
 			expectedPort: 8080,
-			expectError: false,
+			expectError:  false,
 		},
 		{
-			name:        "empty host (should default to 0.0.0.0)",
-			addr:        ":5000",
-			expectedIP:  "0.0.0.0",
+			name:         "empty host (should default to 0.0.0.0)",
+			addr:         ":5000",
+			expectedIP:   "0.0.0.0",
 			expectedPort: 5000,
-			expectError: false,
+			expectError:  false,
 		},
 		{
-			name:        "IPv6 with port",
-			addr:        "[::1]:8080",
-			expectedIP:  "::1",
+			name:         "IPv6 with port",
+			addr:         "[::1]:8080",
+			expectedIP:   "::1",
 			expectedPort: 8080,
-			expectError: false,
+			expectError:  false,
 		},
 		{
 			name:        "invalid address format",
@@ -305,18 +305,18 @@ func TestSTUNClient_PerformHolePunch_InvalidAddress(t *testing.T) {
 	defer cancel()
 
 	tests := []struct {
-		name      string
-		localAddr string
+		name       string
+		localAddr  string
 		remoteAddr string
 	}{
 		{
-			name:      "invalid local address",
-			localAddr: "invalid",
+			name:       "invalid local address",
+			localAddr:  "invalid",
 			remoteAddr: "192.168.1.100:5000",
 		},
 		{
-			name:      "invalid remote address",
-			localAddr: "127.0.0.1:5000",
+			name:       "invalid remote address",
+			localAddr:  "127.0.0.1:5000",
 			remoteAddr: "invalid",
 		},
 	}

@@ -15,6 +15,118 @@ import (
 	"github.com/cloudless/cloudless/pkg/api"
 )
 
+// YAML manifest structures for Kubernetes-style workload definitions
+// These mirror the YAML structure and are converted to protobuf messages
+
+type WorkloadManifest struct {
+	APIVersion string           `yaml:"apiVersion"`
+	Kind       string           `yaml:"kind"`
+	Metadata   ManifestMetadata `yaml:"metadata"`
+	Spec       ManifestSpec     `yaml:"spec"`
+}
+
+type ManifestMetadata struct {
+	Name        string            `yaml:"name"`
+	Namespace   string            `yaml:"namespace"`
+	Labels      map[string]string `yaml:"labels"`
+	Annotations map[string]string `yaml:"annotations"`
+}
+
+type ManifestSpec struct {
+	Image            string                        `yaml:"image"`
+	Command          []string                      `yaml:"command"`
+	Args             []string                      `yaml:"args"`
+	Env              map[string]string             `yaml:"env"`
+	Resources        *ManifestResourceRequirements `yaml:"resources"`
+	Replicas         int32                         `yaml:"replicas"`
+	Placement        *ManifestPlacement            `yaml:"placement"`
+	RestartPolicy    *ManifestRestartPolicy        `yaml:"restart_policy"`
+	Volumes          []ManifestVolume              `yaml:"volumes"`
+	Ports            []ManifestPort                `yaml:"ports"`
+	LivenessProbe    *ManifestHealthCheck          `yaml:"liveness_probe"`
+	ReadinessProbe   *ManifestHealthCheck          `yaml:"readiness_probe"`
+	ImagePullSecrets []string                      `yaml:"image_pull_secrets"`
+}
+
+type ManifestResourceRequirements struct {
+	Requests *ManifestResourceCapacity `yaml:"requests"`
+	Limits   *ManifestResourceCapacity `yaml:"limits"`
+}
+
+type ManifestResourceCapacity struct {
+	CPUMillicores int64 `yaml:"cpu_millicores"`
+	MemoryBytes   int64 `yaml:"memory_bytes"`
+	StorageBytes  int64 `yaml:"storage_bytes"`
+}
+
+type ManifestPlacement struct {
+	Regions         []string            `yaml:"regions"`
+	Zones           []string            `yaml:"zones"`
+	NodeSelector    map[string]string   `yaml:"node_selector"`
+	Affinity        []ManifestAffinity  `yaml:"affinity"`
+	AntiAffinity    []ManifestAffinity  `yaml:"anti_affinity"`
+	SpreadTopology  string              `yaml:"spread_topology"`
+}
+
+type ManifestAffinity struct {
+	Type        string            `yaml:"type"`
+	MatchLabels map[string]string `yaml:"match_labels"`
+	TopologyKey string            `yaml:"topology_key"`
+	Required    bool              `yaml:"required"`
+}
+
+type ManifestRestartPolicy struct {
+	Policy     string `yaml:"policy"`
+	MaxRetries int32  `yaml:"max_retries"`
+	Backoff    string `yaml:"backoff"` // Duration string like "30s"
+}
+
+type ManifestVolume struct {
+	Name      string            `yaml:"name"`
+	Source    string            `yaml:"source"`
+	MountPath string            `yaml:"mount_path"`
+	ReadOnly  bool              `yaml:"read_only"`
+	Options   map[string]string `yaml:"options"`
+}
+
+type ManifestPort struct {
+	Name          string `yaml:"name"`
+	ContainerPort int32  `yaml:"container_port"`
+	HostPort      int32  `yaml:"host_port"`
+	Protocol      string `yaml:"protocol"`
+}
+
+type ManifestHealthCheck struct {
+	HTTP             *ManifestHTTPProbe `yaml:"http"`
+	TCP              *ManifestTCPProbe  `yaml:"tcp"`
+	Exec             *ManifestExecProbe `yaml:"exec"`
+	InitialDelay     string             `yaml:"initial_delay"`     // Duration string like "15s"
+	Period           string             `yaml:"period"`            // Duration string like "10s"
+	Timeout          string             `yaml:"timeout"`           // Duration string like "3s"
+	SuccessThreshold int32              `yaml:"success_threshold"`
+	FailureThreshold int32              `yaml:"failure_threshold"`
+}
+
+type ManifestHTTPProbe struct {
+	Path    string              `yaml:"path"`
+	Port    int32               `yaml:"port"`
+	Scheme  string              `yaml:"scheme"` // HTTP or HTTPS
+	Headers []ManifestHTTPHeader `yaml:"headers"`
+}
+
+type ManifestHTTPHeader struct {
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
+}
+
+type ManifestTCPProbe struct {
+	Port int32 `yaml:"port"`
+}
+
+type ManifestExecProbe struct {
+	Command []string `yaml:"command"`
+}
+
 // NewWorkloadCommand creates the workload command
 func NewWorkloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -42,7 +154,7 @@ func newWorkloadCreateCommand() *cobra.Command {
 		Short: "Create a workload",
 		Long:  "Create a workload from a YAML/JSON manifest file or command-line flags",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkloadCreate(cmd)
+			return runWorkloadCreate(cmd, args)
 		},
 	}
 
@@ -106,12 +218,267 @@ func parseWorkloadManifest(filename string) (*api.Workload, error) {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	var workload api.Workload
-	if err := yaml.Unmarshal(data, &workload); err != nil {
+	// Parse YAML into WorkloadManifest structure
+	var manifest WorkloadManifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	return &workload, nil
+	// Convert to protobuf Workload
+	workload, err := manifest.ToWorkload()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert manifest: %w", err)
+	}
+
+	return workload, nil
+}
+
+// Helper functions for converting YAML manifest to protobuf
+
+// parseDuration converts a duration string (like "15s", "10m") to durationpb.Duration
+func parseDuration(s string) (*durationpb.Duration, error) {
+	if s == "" {
+		return nil, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	return durationpb.New(d), nil
+}
+
+// parseRestartPolicy converts a policy string to protobuf enum
+func parseRestartPolicy(s string) (api.RestartPolicy_Policy, error) {
+	switch s {
+	case "ALWAYS":
+		return api.RestartPolicy_ALWAYS, nil
+	case "ON_FAILURE":
+		return api.RestartPolicy_ON_FAILURE, nil
+	case "NEVER":
+		return api.RestartPolicy_NEVER, nil
+	default:
+		return api.RestartPolicy_ALWAYS, fmt.Errorf("invalid restart policy %q (must be ALWAYS, ON_FAILURE, or NEVER)", s)
+	}
+}
+
+// parseHTTPScheme validates and returns the HTTP scheme string
+func parseHTTPScheme(s string) (string, error) {
+	switch s {
+	case "", "HTTP":
+		return "HTTP", nil
+	case "HTTPS":
+		return "HTTPS", nil
+	default:
+		return "HTTP", fmt.Errorf("invalid HTTP scheme %q (must be HTTP or HTTPS)", s)
+	}
+}
+
+// parseAffinityType converts an affinity type string to protobuf enum
+func parseAffinityType(s string) (api.Affinity_Type, error) {
+	switch s {
+	case "NODE":
+		return api.Affinity_NODE, nil
+	case "WORKLOAD":
+		return api.Affinity_WORKLOAD, nil
+	default:
+		return api.Affinity_NODE, fmt.Errorf("invalid affinity type %q (must be NODE or WORKLOAD)", s)
+	}
+}
+
+// ToWorkload converts WorkloadManifest to api.Workload protobuf message
+func (m *WorkloadManifest) ToWorkload() (*api.Workload, error) {
+	// Build WorkloadSpec
+	spec := &api.WorkloadSpec{
+		Image:            m.Spec.Image,
+		Command:          m.Spec.Command,
+		Args:             m.Spec.Args,
+		Env:              m.Spec.Env,
+		Replicas:         m.Spec.Replicas,
+		ImagePullSecrets: m.Spec.ImagePullSecrets,
+	}
+
+	// Convert resources
+	if m.Spec.Resources != nil {
+		spec.Resources = &api.ResourceRequirements{}
+		if m.Spec.Resources.Requests != nil {
+			spec.Resources.Requests = &api.ResourceCapacity{
+				CpuMillicores: m.Spec.Resources.Requests.CPUMillicores,
+				MemoryBytes:   m.Spec.Resources.Requests.MemoryBytes,
+				StorageBytes:  m.Spec.Resources.Requests.StorageBytes,
+			}
+		}
+		if m.Spec.Resources.Limits != nil {
+			spec.Resources.Limits = &api.ResourceCapacity{
+				CpuMillicores: m.Spec.Resources.Limits.CPUMillicores,
+				MemoryBytes:   m.Spec.Resources.Limits.MemoryBytes,
+				StorageBytes:  m.Spec.Resources.Limits.StorageBytes,
+			}
+		}
+	}
+
+	// Convert restart policy
+	if m.Spec.RestartPolicy != nil {
+		policy, err := parseRestartPolicy(m.Spec.RestartPolicy.Policy)
+		if err != nil {
+			return nil, err
+		}
+		backoff, err := parseDuration(m.Spec.RestartPolicy.Backoff)
+		if err != nil {
+			return nil, fmt.Errorf("restart_policy.backoff: %w", err)
+		}
+		spec.RestartPolicy = &api.RestartPolicy{
+			Policy:     policy,
+			MaxRetries: m.Spec.RestartPolicy.MaxRetries,
+			Backoff:    backoff,
+		}
+	}
+
+	// Convert placement
+	if m.Spec.Placement != nil {
+		spec.Placement = &api.PlacementPolicy{
+			Regions:        m.Spec.Placement.Regions,
+			Zones:          m.Spec.Placement.Zones,
+			NodeSelector:   m.Spec.Placement.NodeSelector,
+			SpreadTopology: m.Spec.Placement.SpreadTopology,
+		}
+
+		// Convert affinity rules
+		for _, aff := range m.Spec.Placement.Affinity {
+			affType, err := parseAffinityType(aff.Type)
+			if err != nil {
+				return nil, err
+			}
+			spec.Placement.Affinity = append(spec.Placement.Affinity, &api.Affinity{
+				Type:        affType,
+				MatchLabels: aff.MatchLabels,
+				TopologyKey: aff.TopologyKey,
+				Required:    aff.Required,
+			})
+		}
+
+		// Convert anti-affinity rules
+		for _, aff := range m.Spec.Placement.AntiAffinity {
+			affType, err := parseAffinityType(aff.Type)
+			if err != nil {
+				return nil, err
+			}
+			spec.Placement.AntiAffinity = append(spec.Placement.AntiAffinity, &api.Affinity{
+				Type:        affType,
+				MatchLabels: aff.MatchLabels,
+				TopologyKey: aff.TopologyKey,
+				Required:    aff.Required,
+			})
+		}
+	}
+
+	// Convert volumes
+	for _, vol := range m.Spec.Volumes {
+		spec.Volumes = append(spec.Volumes, &api.Volume{
+			Name:      vol.Name,
+			Source:    vol.Source,
+			MountPath: vol.MountPath,
+			ReadOnly:  vol.ReadOnly,
+			Options:   vol.Options,
+		})
+	}
+
+	// Convert ports
+	for _, port := range m.Spec.Ports {
+		spec.Ports = append(spec.Ports, &api.Port{
+			Name:          port.Name,
+			ContainerPort: port.ContainerPort,
+			HostPort:      port.HostPort,
+			Protocol:      port.Protocol,
+		})
+	}
+
+	// Convert liveness probe
+	if m.Spec.LivenessProbe != nil {
+		probe, err := m.Spec.LivenessProbe.ToHealthCheck()
+		if err != nil {
+			return nil, fmt.Errorf("liveness_probe: %w", err)
+		}
+		spec.LivenessProbe = probe
+	}
+
+	// Convert readiness probe
+	if m.Spec.ReadinessProbe != nil {
+		probe, err := m.Spec.ReadinessProbe.ToHealthCheck()
+		if err != nil {
+			return nil, fmt.Errorf("readiness_probe: %w", err)
+		}
+		spec.ReadinessProbe = probe
+	}
+
+	// Build Workload
+	workload := &api.Workload{
+		Name:        m.Metadata.Name,
+		Namespace:   m.Metadata.Namespace,
+		Labels:      m.Metadata.Labels,
+		Annotations: m.Metadata.Annotations,
+		Spec:        spec,
+	}
+
+	return workload, nil
+}
+
+// ToHealthCheck converts ManifestHealthCheck to api.HealthCheck
+func (h *ManifestHealthCheck) ToHealthCheck() (*api.HealthCheck, error) {
+	check := &api.HealthCheck{
+		SuccessThreshold: h.SuccessThreshold,
+		FailureThreshold: h.FailureThreshold,
+	}
+
+	// Parse durations
+	var err error
+	check.InitialDelay, err = parseDuration(h.InitialDelay)
+	if err != nil {
+		return nil, fmt.Errorf("initial_delay: %w", err)
+	}
+	check.Period, err = parseDuration(h.Period)
+	if err != nil {
+		return nil, fmt.Errorf("period: %w", err)
+	}
+	check.Timeout, err = parseDuration(h.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("timeout: %w", err)
+	}
+
+	// Determine probe type and convert
+	if h.HTTP != nil {
+		scheme, err := parseHTTPScheme(h.HTTP.Scheme)
+		if err != nil {
+			return nil, err
+		}
+		httpProbe := &api.HTTPProbe{
+			Path:   h.HTTP.Path,
+			Port:   h.HTTP.Port,
+			Scheme: scheme,
+		}
+		for _, hdr := range h.HTTP.Headers {
+			httpProbe.Headers = append(httpProbe.Headers, &api.HTTPHeader{
+				Name:  hdr.Name,
+				Value: hdr.Value,
+			})
+		}
+		check.Check = &api.HealthCheck_Http{Http: httpProbe}
+	} else if h.TCP != nil {
+		check.Check = &api.HealthCheck_Tcp{
+			Tcp: &api.TCPProbe{
+				Port: h.TCP.Port,
+			},
+		}
+	} else if h.Exec != nil {
+		check.Check = &api.HealthCheck_Exec{
+			Exec: &api.ExecProbe{
+				Command: h.Exec.Command,
+			},
+		}
+	} else {
+		return nil, fmt.Errorf("health check must specify one of: http, tcp, or exec")
+	}
+
+	return check, nil
 }
 
 func parseWorkloadFlags(cmd *cobra.Command) (*api.Workload, error) {
@@ -419,7 +786,7 @@ func runWorkloadLogs(cmd *cobra.Command, containerID string) error {
 
 	// Create client (Note: logs are served by agent, not coordinator)
 	// For MVP, we'll connect through coordinator which proxies to agent
-	client, conn, err := cfg.NewGRPCClient()
+	conn, err := cfg.NewGRPCClient()
 	if err != nil {
 		return err
 	}
@@ -485,7 +852,7 @@ func runWorkloadExec(cmd *cobra.Command, containerID string, command []string) e
 	}
 
 	// Create client
-	client, conn, err := cfg.NewGRPCClient()
+	conn, err := cfg.NewGRPCClient()
 	if err != nil {
 		return err
 	}

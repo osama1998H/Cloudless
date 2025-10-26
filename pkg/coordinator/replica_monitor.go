@@ -43,8 +43,8 @@ type ReplicaMonitor struct {
 	reconcileInterval time.Duration
 
 	// Track failure timestamps for latency calculation
-	mu                 sync.RWMutex
-	failureTimestamps  map[string]time.Time // replicaID -> failure detection time
+	mu                sync.RWMutex
+	failureTimestamps map[string]time.Time // replicaID -> failure detection time
 
 	// Lifecycle management
 	ctx    context.Context
@@ -62,12 +62,12 @@ func NewReplicaMonitor(config ReplicaMonitorConfig, workloadStateMgr *WorkloadSt
 	}
 
 	return &ReplicaMonitor{
-		config:             config,
-		logger:             config.Logger,
-		workloadStateMgr:   workloadStateMgr,
-		coordinator:        coordinator,
-		reconcileInterval:  config.ReconcileInterval,
-		failureTimestamps:  make(map[string]time.Time),
+		config:            config,
+		logger:            config.Logger,
+		workloadStateMgr:  workloadStateMgr,
+		coordinator:       coordinator,
+		reconcileInterval: config.ReconcileInterval,
+		failureTimestamps: make(map[string]time.Time),
 	}, nil
 }
 

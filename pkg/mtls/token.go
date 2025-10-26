@@ -22,20 +22,20 @@ type TokenManager struct {
 
 // BootstrapToken represents a token for node enrollment
 type BootstrapToken struct {
-	ID         string
-	Token      string
+	ID          string
+	Token       string
 	HashedToken []byte
-	NodeID     string
-	NodeName   string
-	Region     string
-	Zone       string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	Used       bool
-	UsedAt     time.Time
-	UsedBy     string
-	MaxUses    int
-	UseCount   int
+	NodeID      string
+	NodeName    string
+	Region      string
+	Zone        string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	Used        bool
+	UsedAt      time.Time
+	UsedBy      string
+	MaxUses     int
+	UseCount    int
 }
 
 // TokenClaims represents JWT claims for the token

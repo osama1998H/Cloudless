@@ -66,6 +66,7 @@ func init() {
 	rootCmd.PersistentFlags().Int("memory-mb", 0, "Memory in MB (0 for auto-detect)")
 	rootCmd.PersistentFlags().Int("storage-gb", 0, "Storage in GB (0 for auto-detect)")
 	rootCmd.PersistentFlags().Int("bandwidth-mbps", 0, "Bandwidth in Mbps (0 for auto-detect)")
+	rootCmd.PersistentFlags().Bool("enable-health-probes", true, "Enable health probe monitoring (CLD-REQ-032)")
 
 	// Bind flags to viper
 	viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config"))
@@ -90,6 +91,7 @@ func init() {
 	viper.BindPFlag("resources.memory_mb", rootCmd.PersistentFlags().Lookup("memory-mb"))
 	viper.BindPFlag("resources.storage_gb", rootCmd.PersistentFlags().Lookup("storage-gb"))
 	viper.BindPFlag("resources.bandwidth_mbps", rootCmd.PersistentFlags().Lookup("bandwidth-mbps"))
+	viper.BindPFlag("agent.enable_health_probes", rootCmd.PersistentFlags().Lookup("enable-health-probes"))
 
 	// Set up environment variable binding
 	viper.SetEnvPrefix("CLOUDLESS")
@@ -163,23 +165,24 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Initialize agent configuration
 	config := &agent.Config{
-		DataDir:          viper.GetString("data_dir"),
-		CoordinatorAddr:  viper.GetString("coordinator_addr"),
-		AgentAddr:        viper.GetString("agent_addr"),
-		MetricsAddr:      viper.GetString("metrics_addr"),
-		NodeID:           viper.GetString("node_id"),
-		NodeName:         viper.GetString("node_name"),
-		Region:           viper.GetString("region"),
-		Zone:             viper.GetString("zone"),
-		JoinToken:        viper.GetString("join_token"),
-		HeartbeatInterval: viper.GetDuration("heartbeat_interval"),
-		ContainerRuntime: viper.GetString("container.runtime"),
-		ContainerSocket:  viper.GetString("container.socket"),
-		CertificateFile:  viper.GetString("tls.cert"),
-		KeyFile:          viper.GetString("tls.key"),
-		CAFile:           viper.GetString("tls.ca"),
-		Resources:        resources,
-		Logger:           logger,
+		DataDir:            viper.GetString("data_dir"),
+		CoordinatorAddr:    viper.GetString("coordinator_addr"),
+		AgentAddr:          viper.GetString("agent_addr"),
+		MetricsAddr:        viper.GetString("metrics_addr"),
+		NodeID:             viper.GetString("node_id"),
+		NodeName:           viper.GetString("node_name"),
+		Region:             viper.GetString("region"),
+		Zone:               viper.GetString("zone"),
+		JoinToken:          viper.GetString("join_token"),
+		HeartbeatInterval:  viper.GetDuration("heartbeat_interval"),
+		ContainerRuntime:   viper.GetString("container.runtime"),
+		ContainerSocket:    viper.GetString("container.socket"),
+		CertificateFile:    viper.GetString("tls.cert"),
+		KeyFile:            viper.GetString("tls.key"),
+		CAFile:             viper.GetString("tls.ca"),
+		EnableHealthProbes: viper.GetBool("agent.enable_health_probes"), // CLD-REQ-032
+		Resources:          resources,
+		Logger:             logger,
 	}
 
 	// Validate configuration

@@ -13,23 +13,23 @@ import (
 // Requirement: Bin-pack by default
 func TestBinPacker_Pack_BasicPacking(t *testing.T) {
 	tests := []struct {
-		name                string
-		nodeCount           int
-		nodeCPU             int64
-		nodeMemory          int64
-		replicaCount        int
-		replicaCPU          int64
-		replicaMemory       int64
-		expectedPlacements  int
-		description         string
+		name               string
+		nodeCount          int
+		nodeCPU            int64
+		nodeMemory         int64
+		replicaCount       int
+		replicaCPU         int64
+		replicaMemory      int64
+		expectedPlacements int
+		description        string
 	}{
 		{
 			name:               "pack_all_replicas_on_single_node",
 			nodeCount:          3,
-			nodeCPU:            4000, // 4 CPU cores
+			nodeCPU:            4000,                   // 4 CPU cores
 			nodeMemory:         8 * 1024 * 1024 * 1024, // 8 GB
 			replicaCount:       3,
-			replicaCPU:         500, // 0.5 CPU
+			replicaCPU:         500,               // 0.5 CPU
 			replicaMemory:      512 * 1024 * 1024, // 512 MB
 			expectedPlacements: 3,
 			description:        "All replicas should pack on highest-scored node when they fit",
@@ -37,10 +37,10 @@ func TestBinPacker_Pack_BasicPacking(t *testing.T) {
 		{
 			name:               "distribute_when_single_node_insufficient",
 			nodeCount:          3,
-			nodeCPU:            2000, // 2 CPU cores per node
+			nodeCPU:            2000,                   // 2 CPU cores per node
 			nodeMemory:         4 * 1024 * 1024 * 1024, // 4 GB per node
 			replicaCount:       5,
-			replicaCPU:         800, // 0.8 CPU each
+			replicaCPU:         800,                // 0.8 CPU each
 			replicaMemory:      1024 * 1024 * 1024, // 1 GB each
 			expectedPlacements: 5,
 			description:        "Should distribute across nodes when single node capacity exceeded",
@@ -48,10 +48,10 @@ func TestBinPacker_Pack_BasicPacking(t *testing.T) {
 		{
 			name:               "respect_memory_constraints",
 			nodeCount:          2,
-			nodeCPU:            8000, // 8 CPU cores
+			nodeCPU:            8000,                   // 8 CPU cores
 			nodeMemory:         2 * 1024 * 1024 * 1024, // 2 GB
 			replicaCount:       3,
-			replicaCPU:         1000, // 1 CPU
+			replicaCPU:         1000,               // 1 CPU
 			replicaMemory:      1024 * 1024 * 1024, // 1 GB each
 			expectedPlacements: 3,
 			description:        "Should pack based on memory constraints even with excess CPU",
@@ -59,12 +59,12 @@ func TestBinPacker_Pack_BasicPacking(t *testing.T) {
 		{
 			name:               "handle_insufficient_cluster_capacity",
 			nodeCount:          2,
-			nodeCPU:            1000, // 1 CPU core
+			nodeCPU:            1000,               // 1 CPU core
 			nodeMemory:         1024 * 1024 * 1024, // 1 GB
 			replicaCount:       5,
-			replicaCPU:         800, // 0.8 CPU each
+			replicaCPU:         800,               // 0.8 CPU each
 			replicaMemory:      512 * 1024 * 1024, // 512 MB
-			expectedPlacements: 2, // Only 2 can fit
+			expectedPlacements: 2,                 // Only 2 can fit
 			description:        "Should place as many as possible when cluster capacity insufficient",
 		},
 	}
@@ -221,18 +221,18 @@ func TestScheduler_PackingStrategy_Default(t *testing.T) {
 // Requirement: Support spread across zones for HA
 func TestScheduler_SpreadStrategy_ZoneDistribution(t *testing.T) {
 	tests := []struct {
-		name             string
-		zones            []string
-		nodesPerZone     int
-		replicaCount     int
-		expectedZones    map[string]int // zone -> min replicas
-		description      string
+		name          string
+		zones         []string
+		nodesPerZone  int
+		replicaCount  int
+		expectedZones map[string]int // zone -> min replicas
+		description   string
 	}{
 		{
-			name:          "distribute_across_three_zones",
-			zones:         []string{"zone-a", "zone-b", "zone-c"},
-			nodesPerZone:  2,
-			replicaCount:  6,
+			name:         "distribute_across_three_zones",
+			zones:        []string{"zone-a", "zone-b", "zone-c"},
+			nodesPerZone: 2,
+			replicaCount: 6,
 			expectedZones: map[string]int{
 				"zone-a": 1,
 				"zone-b": 1,
@@ -241,10 +241,10 @@ func TestScheduler_SpreadStrategy_ZoneDistribution(t *testing.T) {
 			description: "Should place at least one replica in each zone for HA",
 		},
 		{
-			name:          "handle_more_replicas_than_zones",
-			zones:         []string{"zone-a", "zone-b"},
-			nodesPerZone:  3,
-			replicaCount:  5,
+			name:         "handle_more_replicas_than_zones",
+			zones:        []string{"zone-a", "zone-b"},
+			nodesPerZone: 3,
+			replicaCount: 5,
 			expectedZones: map[string]int{
 				"zone-a": 1,
 				"zone-b": 1,
@@ -252,20 +252,20 @@ func TestScheduler_SpreadStrategy_ZoneDistribution(t *testing.T) {
 			description: "Should distribute across all zones even with more replicas",
 		},
 		{
-			name:          "handle_single_zone",
-			zones:         []string{"zone-a"},
-			nodesPerZone:  3,
-			replicaCount:  3,
+			name:         "handle_single_zone",
+			zones:        []string{"zone-a"},
+			nodesPerZone: 3,
+			replicaCount: 3,
 			expectedZones: map[string]int{
 				"zone-a": 3,
 			},
 			description: "Should handle single zone deployment",
 		},
 		{
-			name:          "prioritize_zone_diversity",
-			zones:         []string{"zone-a", "zone-b", "zone-c"},
-			nodesPerZone:  1,
-			replicaCount:  3,
+			name:         "prioritize_zone_diversity",
+			zones:        []string{"zone-a", "zone-b", "zone-c"},
+			nodesPerZone: 1,
+			replicaCount: 3,
 			expectedZones: map[string]int{
 				"zone-a": 1,
 				"zone-b": 1,
@@ -286,11 +286,11 @@ func TestScheduler_SpreadStrategy_ZoneDistribution(t *testing.T) {
 				for i := 0; i < tt.nodesPerZone; i++ {
 					nodes = append(nodes, ScoredNode{
 						Node: &membership.NodeInfo{
-							ID:   fmt.Sprintf("node-%d", nodeID),
-							Name: fmt.Sprintf("node-%d", nodeID),
-							Zone: zone,
+							ID:     fmt.Sprintf("node-%d", nodeID),
+							Name:   fmt.Sprintf("node-%d", nodeID),
+							Zone:   zone,
 							Region: "region-1",
-							State: membership.StateReady,
+							State:  membership.StateReady,
 							Capacity: membership.ResourceCapacity{
 								CPUMillicores: 4000,
 								MemoryBytes:   8 * 1024 * 1024 * 1024,

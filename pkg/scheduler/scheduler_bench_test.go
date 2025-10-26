@@ -56,10 +56,10 @@ func BenchmarkScheduleWorkload(b *testing.B) {
 // BenchmarkNodeScoring benchmarks the node scoring algorithm
 func BenchmarkNodeScoring(b *testing.B) {
 	scorer := &Scorer{
-		LocalityWeight:     0.3,
-		ReliabilityWeight:  0.25,
-		CostWeight:         0.15,
-		UtilizationWeight:  0.2,
+		LocalityWeight:       0.3,
+		ReliabilityWeight:    0.25,
+		CostWeight:           0.15,
+		UtilizationWeight:    0.2,
 		NetworkPenaltyWeight: 0.1,
 	}
 
@@ -105,8 +105,8 @@ func BenchmarkFilterNodes(b *testing.B) {
 		constraints *api.PlacementPolicy
 	}{
 		{
-			name:      "no_constraints_100",
-			nodeCount: 100,
+			name:        "no_constraints_100",
+			nodeCount:   100,
 			constraints: nil,
 		},
 		{
@@ -129,8 +129,8 @@ func BenchmarkFilterNodes(b *testing.B) {
 			name:      "multiple_constraints_1000",
 			nodeCount: 1000,
 			constraints: &api.PlacementPolicy{
-				Zones:        []string{"us-east-1a", "us-east-1b"},
-				Regions:      []string{"us-east"},
+				Zones:   []string{"us-east-1a", "us-east-1b"},
+				Regions: []string{"us-east"},
 				NodeSelector: map[string]string{
 					"tier":     "premium",
 					"workload": "api",
@@ -265,11 +265,11 @@ func createBenchScheduler(nodeCount int) *Scheduler {
 	}
 
 	scorer := &Scorer{
-		LocalityWeight:        0.3,
-		ReliabilityWeight:     0.25,
-		CostWeight:            0.15,
-		UtilizationWeight:     0.2,
-		NetworkPenaltyWeight:  0.1,
+		LocalityWeight:       0.3,
+		ReliabilityWeight:    0.25,
+		CostWeight:           0.15,
+		UtilizationWeight:    0.2,
+		NetworkPenaltyWeight: 0.1,
 	}
 
 	return &Scheduler{

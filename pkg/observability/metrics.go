@@ -214,6 +214,14 @@ var (
 			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0},
 		},
 	)
+
+	MembershipNodeRecoverySeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_membership_node_recovery_seconds",
+			Help:    "Time for a node to recover from offline state and rejoin the cluster",
+			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0},
+		},
+	)
 )
 
 // Workload Metrics

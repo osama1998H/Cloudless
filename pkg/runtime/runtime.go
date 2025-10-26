@@ -18,6 +18,7 @@ type Runtime interface {
 	StopContainer(ctx context.Context, containerID string, timeout time.Duration) error
 	DeleteContainer(ctx context.Context, containerID string) error
 	GetContainer(ctx context.Context, containerID string) (*Container, error)
+	GetContainerIP(ctx context.Context, containerID string) (string, error)
 	ListContainers(ctx context.Context) ([]*Container, error)
 	GetContainerLogs(ctx context.Context, containerID string, follow bool) (<-chan LogEntry, error)
 	GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)

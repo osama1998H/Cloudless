@@ -27,25 +27,25 @@ func TestCPUQuotaCalculation(t *testing.T) {
 		{
 			name:       "0.1 cores (100 millicores)",
 			millicores: 100,
-			wantQuota:  10000,  // 100 * 100000 / 1000
+			wantQuota:  10000, // 100 * 100000 / 1000
 			wantPeriod: 100000,
 		},
 		{
 			name:       "0.25 cores (250 millicores)",
 			millicores: 250,
-			wantQuota:  25000,  // 250 * 100000 / 1000
+			wantQuota:  25000, // 250 * 100000 / 1000
 			wantPeriod: 100000,
 		},
 		{
 			name:       "0.5 cores (500 millicores)",
 			millicores: 500,
-			wantQuota:  50000,  // 500 * 100000 / 1000
+			wantQuota:  50000, // 500 * 100000 / 1000
 			wantPeriod: 100000,
 		},
 		{
 			name:       "0.75 cores (750 millicores)",
 			millicores: 750,
-			wantQuota:  75000,  // 750 * 100000 / 1000
+			wantQuota:  75000, // 750 * 100000 / 1000
 			wantPeriod: 100000,
 		},
 		{
@@ -234,12 +234,12 @@ func TestStorageLimitConfiguration(t *testing.T) {
 func TestGPUDeviceCgroupConfiguration(t *testing.T) {
 	// CLD-REQ-011: Verify GPU device cgroup rules are configured correctly
 	tests := []struct {
-		name             string
-		gpuCount         int32
-		wantNVIDIAMajor  int64
-		wantDRIMajor     int64
-		wantMinor        int64
-		wantAccess       string
+		name            string
+		gpuCount        int32
+		wantNVIDIAMajor int64
+		wantDRIMajor    int64
+		wantMinor       int64
+		wantAccess      string
 	}{
 		{
 			name:            "1 GPU",

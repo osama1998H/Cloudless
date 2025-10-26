@@ -689,24 +689,24 @@ func TestNATTraversal_FallbackScenario(t *testing.T) {
 
 	// Verify strategy determination for fallback scenarios
 	tests := []struct {
-		name            string
-		localNAT        NATType
-		peerNAT         NATType
-		expectedFirst   NATTraversalStrategy
+		name             string
+		localNAT         NATType
+		peerNAT          NATType
+		expectedFirst    NATTraversalStrategy
 		expectedFallback NATTraversalStrategy
 	}{
 		{
-			name:            "full cone NAT - try hole punch first",
-			localNAT:        NATTypeFullCone,
-			peerNAT:         NATTypePortRestrictedCone,
-			expectedFirst:   StrategyHolePunch,
+			name:             "full cone NAT - try hole punch first",
+			localNAT:         NATTypeFullCone,
+			peerNAT:          NATTypePortRestrictedCone,
+			expectedFirst:    StrategyHolePunch,
 			expectedFallback: StrategyRelay,
 		},
 		{
-			name:            "symmetric NAT with full cone - relay (FIXED)",
-			localNAT:        NATTypeSymmetric,
-			peerNAT:         NATTypeFullCone,
-			expectedFirst:   StrategyRelay, // FIXED: Symmetric check now happens first
+			name:             "symmetric NAT with full cone - relay (FIXED)",
+			localNAT:         NATTypeSymmetric,
+			peerNAT:          NATTypeFullCone,
+			expectedFirst:    StrategyRelay, // FIXED: Symmetric check now happens first
 			expectedFallback: StrategyRelay,
 		},
 	}

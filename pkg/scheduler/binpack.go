@@ -24,10 +24,10 @@ type Bin struct {
 
 // Item represents a workload to be packed
 type Item struct {
-	ID               string
-	RequiredCPU      int64
-	RequiredMemory   int64
-	RequiredStorage  int64
+	ID              string
+	RequiredCPU     int64
+	RequiredMemory  int64
+	RequiredStorage int64
 }
 
 // Placement represents a placement decision
@@ -271,14 +271,14 @@ func (bp *BinPacker) createBins(nodes []ScoredNode) []Bin {
 // fits checks if an item fits in a bin
 func (bp *BinPacker) fits(item Item, bin Bin) bool {
 	return item.RequiredCPU <= bin.AvailableCPU &&
-		   item.RequiredMemory <= bin.AvailableMemory &&
-		   item.RequiredStorage <= bin.AvailableStorage
+		item.RequiredMemory <= bin.AvailableMemory &&
+		item.RequiredStorage <= bin.AvailableStorage
 }
 
 // calculateWaste calculates the waste if item is placed in bin
 func (bp *BinPacker) calculateWaste(item Item, bin Bin) int64 {
 	cpuWaste := bin.AvailableCPU - item.RequiredCPU
-	memoryWaste := (bin.AvailableMemory - item.RequiredMemory) / 1000000 // Convert to MB for comparison
+	memoryWaste := (bin.AvailableMemory - item.RequiredMemory) / 1000000       // Convert to MB for comparison
 	storageWaste := (bin.AvailableStorage - item.RequiredStorage) / 1000000000 // Convert to GB
 
 	// Weighted sum of waste
@@ -332,8 +332,8 @@ func (bp *BinPacker) nodeHasCapacity(node *membership.NodeInfo, resources Resour
 	availableStorage := node.Capacity.StorageBytes - node.Usage.StorageBytes
 
 	return availableCPU >= resources.CPUMillicores &&
-		   availableMemory >= resources.MemoryBytes &&
-		   availableStorage >= resources.StorageBytes
+		availableMemory >= resources.MemoryBytes &&
+		availableStorage >= resources.StorageBytes
 }
 
 // OptimizePacking optimizes the packing of existing placements

@@ -101,8 +101,8 @@ func (a *Agent) RunContainer(ctx context.Context, req *api.RunContainerRequest) 
 			"fragment.id":        req.FragmentId,
 			"replica.id":         req.ReplicaId,
 		},
-		Annotations:   workload.Annotations,
-		Resources:     resources,
+		Annotations: workload.Annotations,
+		Resources:   resources,
 		Network: runtime.NetworkConfig{
 			NetworkMode: "bridge",
 			Ports:       ports,

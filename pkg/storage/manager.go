@@ -268,11 +268,11 @@ func (sm *StorageManager) AllocateVolume(ctx context.Context, req *AllocateVolum
 	nodeID := nodes[0]
 
 	allocation := &VolumeAllocation{
-		VolumeID:   req.VolumeID,
-		NodeID:     nodeID,
-		SizeBytes:  req.SizeBytes,
-		IOPSClass:  req.IOPSClass,
-		WorkloadID: req.WorkloadID,
+		VolumeID:    req.VolumeID,
+		NodeID:      nodeID,
+		SizeBytes:   req.SizeBytes,
+		IOPSClass:   req.IOPSClass,
+		WorkloadID:  req.WorkloadID,
 		AllocatedAt: time.Now(),
 	}
 
@@ -351,8 +351,8 @@ func (sm *StorageManager) GetRebalancingStatus() *RebalancingStatus {
 	defer sm.mu.RUnlock()
 
 	return &RebalancingStatus{
-		Active:       sm.rebalancingActive,
-		LastRun:      sm.rebalancer.lastRun,
+		Active:              sm.rebalancingActive,
+		LastRun:             sm.rebalancer.lastRun,
 		OperationsCompleted: sm.rebalancer.completedOps,
 		OperationsFailed:    sm.rebalancer.failedOps,
 	}
@@ -506,12 +506,12 @@ type NodeInfo struct {
 
 // NodeStorageStats contains storage statistics for a node
 type NodeStorageStats struct {
-	TotalBytes    int64
-	UsedBytes     int64
+	TotalBytes     int64
+	UsedBytes      int64
 	AvailableBytes int64
-	ChunkCount    int64
-	VolumeCount   int64
-	LastUpdated   time.Time
+	ChunkCount     int64
+	VolumeCount    int64
+	LastUpdated    time.Time
 }
 
 // AllocateVolumeRequest contains parameters for volume allocation
@@ -551,10 +551,10 @@ type ClusterStorageStats struct {
 	TotalChunks      int64
 
 	// Replication
-	HealthyReplicas        int64
-	StaleReplicas          int64
-	CorruptedReplicas      int64
-	UnderReplicatedChunks  int64
+	HealthyReplicas       int64
+	StaleReplicas         int64
+	CorruptedReplicas     int64
+	UnderReplicatedChunks int64
 
 	// Repairs
 	RepairsCompleted int64

@@ -15,11 +15,11 @@ import (
 // This is a core requirement for CLD-REQ-030: Device failure must not reduce service below minAvailable
 func TestFilterFailedNodes_CLD_REQ_030(t *testing.T) {
 	tests := []struct {
-		name                string
-		totalNodes          int
-		failedNodeIndices   []int
-		offlineNodeIndices  []int
-		expectedHealthy     int
+		name               string
+		totalNodes         int
+		failedNodeIndices  []int
+		offlineNodeIndices []int
+		expectedHealthy    int
 	}{
 		{
 			name:               "single failed node excluded",
@@ -122,36 +122,36 @@ func TestFilterFailedNodes_CLD_REQ_030(t *testing.T) {
 // TestReschedule_MinAvailable_Validation tests CLD-REQ-030 minAvailable validation logic
 func TestReschedule_MinAvailable_Validation(t *testing.T) {
 	tests := []struct {
-		name             string
-		minAvailable     int
-		readyReplicas    int
-		expectError      bool
-		errorContains    string
+		name          string
+		minAvailable  int
+		readyReplicas int
+		expectError   bool
+		errorContains string
 	}{
 		{
-			name:             "readyReplicas below minAvailable - should error",
-			minAvailable:     3,
-			readyReplicas:    2,
-			expectError:      true,
-			errorContains:    "below minAvailable",
+			name:          "readyReplicas below minAvailable - should error",
+			minAvailable:  3,
+			readyReplicas: 2,
+			expectError:   true,
+			errorContains: "below minAvailable",
 		},
 		{
-			name:             "readyReplicas equal minAvailable - should pass",
-			minAvailable:     3,
-			readyReplicas:    3,
-			expectError:      false,
+			name:          "readyReplicas equal minAvailable - should pass",
+			minAvailable:  3,
+			readyReplicas: 3,
+			expectError:   false,
 		},
 		{
-			name:             "readyReplicas above minAvailable - should pass",
-			minAvailable:     3,
-			readyReplicas:    5,
-			expectError:      false,
+			name:          "readyReplicas above minAvailable - should pass",
+			minAvailable:  3,
+			readyReplicas: 5,
+			expectError:   false,
 		},
 		{
-			name:             "minAvailable zero - no constraint",
-			minAvailable:     0,
-			readyReplicas:    1,
-			expectError:      false,
+			name:          "minAvailable zero - no constraint",
+			minAvailable:  0,
+			readyReplicas: 1,
+			expectError:   false,
 		},
 	}
 

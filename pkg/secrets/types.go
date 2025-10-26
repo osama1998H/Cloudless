@@ -128,14 +128,14 @@ const (
 // ManagerConfig contains configuration for the secrets manager
 type ManagerConfig struct {
 	// Master key configuration
-	MasterKeyID       string
-	MasterKey         []byte
+	MasterKeyID        string
+	MasterKey          []byte
 	EnableAutoRotation bool
-	RotationInterval  time.Duration
+	RotationInterval   time.Duration
 
 	// Token configuration
-	TokenTTL           time.Duration
-	TokenSigningKey    []byte
+	TokenTTL            time.Duration
+	TokenSigningKey     []byte
 	MaxTokenUsesDefault int
 
 	// Storage

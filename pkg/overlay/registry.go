@@ -14,10 +14,10 @@ type ServiceRegistry struct {
 	config RegistryConfig
 	logger *zap.Logger
 
-	services  sync.Map // serviceName -> *Service
-	endpoints sync.Map // serviceName -> []Endpoint
+	services   sync.Map // serviceName -> *Service
+	endpoints  sync.Map // serviceName -> []Endpoint
 	virtualIPs sync.Map // serviceName -> virtualIP
-	ipPool    *IPPool
+	ipPool     *IPPool
 
 	mu sync.RWMutex
 }

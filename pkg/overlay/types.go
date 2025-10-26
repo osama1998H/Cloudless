@@ -75,8 +75,8 @@ type Peer struct {
 	Metadata  map[string]string
 
 	// NAT traversal information
-	NATType   NATType // Detected NAT type for this peer
-	NATInfo   *NATInfo // Full NAT information if available
+	NATType NATType  // Detected NAT type for this peer
+	NATInfo *NATInfo // Full NAT information if available
 }
 
 // PeerStatus represents the status of a peer
@@ -104,15 +104,15 @@ type Service struct {
 
 // Endpoint represents a service endpoint
 type Endpoint struct {
-	ID        string
-	PeerID    string
-	Address   string
-	Port      int
-	Weight    int
-	Health    HealthStatus
-	Region    string
-	Zone      string
-	Metadata  map[string]string
+	ID       string
+	PeerID   string
+	Address  string
+	Port     int
+	Weight   int
+	Health   HealthStatus
+	Region   string
+	Zone     string
+	Metadata map[string]string
 }
 
 // HealthStatus represents the health status of an endpoint
@@ -146,18 +146,18 @@ type LoadBalancer interface {
 
 // LoadBalancerStats contains load balancing statistics
 type LoadBalancerStats struct {
-	ServiceName       string
-	TotalRequests     uint64
-	EndpointStats     map[string]*EndpointStats
-	LastUpdated       time.Time
+	ServiceName   string
+	TotalRequests uint64
+	EndpointStats map[string]*EndpointStats
+	LastUpdated   time.Time
 }
 
 // EndpointStats contains statistics for an endpoint
 type EndpointStats struct {
-	EndpointID       string
-	Requests         uint64
-	Failures         uint64
-	AverageLatency   time.Duration
+	EndpointID        string
+	Requests          uint64
+	Failures          uint64
+	AverageLatency    time.Duration
 	ActiveConnections int
 }
 
@@ -165,32 +165,32 @@ type EndpointStats struct {
 type LoadBalancingAlgorithm string
 
 const (
-	AlgorithmRoundRobin       LoadBalancingAlgorithm = "round-robin"
+	AlgorithmRoundRobin         LoadBalancingAlgorithm = "round-robin"
 	AlgorithmWeightedRoundRobin LoadBalancingAlgorithm = "weighted-round-robin"
-	AlgorithmLeastConnections LoadBalancingAlgorithm = "least-connections"
-	AlgorithmLocalityAware    LoadBalancingAlgorithm = "locality-aware"
+	AlgorithmLeastConnections   LoadBalancingAlgorithm = "least-connections"
+	AlgorithmLocalityAware      LoadBalancingAlgorithm = "locality-aware"
 )
 
 // NATType represents the type of NAT detected
 type NATType string
 
 const (
-	NATTypeNone                NATType = "none"
-	NATTypeFullCone            NATType = "full-cone"
-	NATTypeRestrictedCone      NATType = "restricted-cone"
-	NATTypePortRestrictedCone  NATType = "port-restricted-cone"
-	NATTypeSymmetric           NATType = "symmetric"
-	NATTypeUnknown             NATType = "unknown"
+	NATTypeNone               NATType = "none"
+	NATTypeFullCone           NATType = "full-cone"
+	NATTypeRestrictedCone     NATType = "restricted-cone"
+	NATTypePortRestrictedCone NATType = "port-restricted-cone"
+	NATTypeSymmetric          NATType = "symmetric"
+	NATTypeUnknown            NATType = "unknown"
 )
 
 // NATInfo contains information about NAT traversal
 type NATInfo struct {
-	Type      NATType
-	PublicIP  string
+	Type       NATType
+	PublicIP   string
 	PublicPort int
-	LocalIP   string
-	LocalPort int
-	Mapped    bool
+	LocalIP    string
+	LocalPort  int
+	Mapped     bool
 }
 
 // Route represents a route in the mesh

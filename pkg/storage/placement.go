@@ -12,11 +12,11 @@ import (
 
 // PlacementStrategy determines where to place chunks and replicas
 type PlacementStrategy struct {
-	config  StorageConfig
-	logger  *zap.Logger
-	nodes   sync.Map // nodeID -> *StorageNode
-	mu      sync.RWMutex
-	rand    *rand.Rand
+	config StorageConfig
+	logger *zap.Logger
+	nodes  sync.Map // nodeID -> *StorageNode
+	mu     sync.RWMutex
+	rand   *rand.Rand
 }
 
 // NewPlacementStrategy creates a new placement strategy
@@ -529,29 +529,29 @@ type RebalanceOperation struct {
 type RebalanceType string
 
 const (
-	RebalanceTypeMove     RebalanceType = "move"
-	RebalanceTypeCopy     RebalanceType = "copy"
-	RebalanceTypeDelete   RebalanceType = "delete"
+	RebalanceTypeMove      RebalanceType = "move"
+	RebalanceTypeCopy      RebalanceType = "copy"
+	RebalanceTypeDelete    RebalanceType = "delete"
 	RebalanceTypeReplicate RebalanceType = "replicate"
 )
 
 // ClusterCapacity contains cluster-wide capacity information
 type ClusterCapacity struct {
-	TotalNodes      int
-	HealthyNodes    int
-	TotalCapacity   int64
-	TotalUsed       int64
-	TotalAvailable  int64
-	UsagePercent    float64
-	LastUpdated     time.Time
+	TotalNodes     int
+	HealthyNodes   int
+	TotalCapacity  int64
+	TotalUsed      int64
+	TotalAvailable int64
+	UsagePercent   float64
+	LastUpdated    time.Time
 
 	// By IOPS class
-	HighIOPSNodes    int
-	MediumIOPSNodes  int
-	LowIOPSNodes     int
-	HighIOPSCapacity int64
+	HighIOPSNodes      int
+	MediumIOPSNodes    int
+	LowIOPSNodes       int
+	HighIOPSCapacity   int64
 	MediumIOPSCapacity int64
-	LowIOPSCapacity  int64
+	LowIOPSCapacity    int64
 
 	// By zone
 	ZoneCapacity map[string]int64

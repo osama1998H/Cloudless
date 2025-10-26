@@ -49,12 +49,12 @@ type Container struct {
 type ContainerState string
 
 const (
-	ContainerStateCreated  ContainerState = "created"
-	ContainerStateRunning  ContainerState = "running"
-	ContainerStateStopped  ContainerState = "stopped"
-	ContainerStatePaused   ContainerState = "paused"
-	ContainerStateFailed   ContainerState = "failed"
-	ContainerStateUnknown  ContainerState = "unknown"
+	ContainerStateCreated ContainerState = "created"
+	ContainerStateRunning ContainerState = "running"
+	ContainerStateStopped ContainerState = "stopped"
+	ContainerStatePaused  ContainerState = "paused"
+	ContainerStateFailed  ContainerState = "failed"
+	ContainerStateUnknown ContainerState = "unknown"
 )
 
 // ResourceRequirements defines resource requirements and limits
@@ -73,12 +73,12 @@ type ResourceList struct {
 
 // NetworkConfig defines network configuration for a container
 type NetworkConfig struct {
-	NetworkMode   string
-	Hostname      string
-	DNS           []string
-	DNSSearch     []string
-	Ports         []PortMapping
-	BandwidthBPS  int64
+	NetworkMode  string
+	Hostname     string
+	DNS          []string
+	DNSSearch    []string
+	Ports        []PortMapping
+	BandwidthBPS int64
 }
 
 // PortMapping defines a port mapping

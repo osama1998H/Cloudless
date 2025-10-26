@@ -660,7 +660,7 @@ func (os *ObjectStore) getTargetNodes(storageClass StorageClass) []string {
 		StorageClass:  storageClass,
 		IOPSClass:     iopsClass,
 		ReplicaCount:  int(os.config.ReplicationFactor),
-		Size:          0, // Size check done at bucket level
+		Size:          0,  // Size check done at bucket level
 		PreferredZone: "", // No zone preference for object storage
 		ExcludeNodes:  []string{},
 	}

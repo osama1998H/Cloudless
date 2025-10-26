@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"syscall"
 	"time"
 
@@ -138,10 +139,10 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 			allow := true
 			gpuDevice := specs.LinuxDeviceCgroup{
 				Allow:  allow,
-				Type:   "c",           // character device
-				Major:  intPtr(195),   // NVIDIA major number
-				Minor:  intPtr(-1),    // All NVIDIA devices
-				Access: "rwm",         // read, write, mknod
+				Type:   "c",         // character device
+				Major:  intPtr(195), // NVIDIA major number
+				Minor:  intPtr(-1),  // All NVIDIA devices
+				Access: "rwm",       // read, write, mknod
 			}
 			s.Linux.Resources.Devices = append(s.Linux.Resources.Devices, gpuDevice)
 
@@ -329,6 +330,70 @@ func (r *ContainerdRuntime) GetContainer(ctx context.Context, containerID string
 	return r.containerToInfo(ctx, container)
 }
 
+// GetContainerIP retrieves the IP address of a running container
+//
+// CLD-REQ-032: Required for health probe configuration (probes need container IP)
+//
+// Implementation: Executes `hostname -i` inside the container to retrieve its IP address.
+// This works reliably across different network configurations (bridge, host, overlay).
+//
+// Returns empty string if container is not running or has no IP assigned.
+func (r *ContainerdRuntime) GetContainerIP(ctx context.Context, containerID string) (string, error) {
+	ctx = r.withNamespace(ctx)
+
+	// Load container
+	container, err := r.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load container: %w", err)
+	}
+
+	// Get task (running container)
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		// Container not running
+		return "", fmt.Errorf("container not running: %w", err)
+	}
+
+	// Check if task is running
+	status, err := task.Status(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get task status: %w", err)
+	}
+
+	if status.Status != containerd.Running {
+		return "", fmt.Errorf("container not in running state: %s", status.Status)
+	}
+
+	// Execute `hostname -i` to get IP address (with 5 second timeout)
+	execCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	execResult, err := r.ExecContainer(execCtx, containerID, ExecConfig{
+		Command: []string{"sh", "-c", "hostname -i"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to execute hostname command: %w", err)
+	}
+
+	if execResult.ExitCode != 0 {
+		return "", fmt.Errorf("hostname command failed with exit code %d: %s",
+			execResult.ExitCode, execResult.Stderr)
+	}
+
+	// Parse IP address from output (trim whitespace/newlines)
+	ip := strings.TrimSpace(string(execResult.Stdout))
+	if ip == "" {
+		return "", fmt.Errorf("no IP address found in container")
+	}
+
+	// Validate it looks like an IP (basic check)
+	if !strings.Contains(ip, ".") && !strings.Contains(ip, ":") {
+		return "", fmt.Errorf("invalid IP address format: %s", ip)
+	}
+
+	return ip, nil
+}
+
 // ListContainers lists all containers
 func (r *ContainerdRuntime) ListContainers(ctx context.Context) ([]*Container, error) {
 	ctx = r.withNamespace(ctx)
@@ -362,12 +427,12 @@ func (r *ContainerdRuntime) containerToInfo(ctx context.Context, c containerd.Co
 	}
 
 	container := &Container{
-		ID:          info.ID,
-		Image:       info.Image,
-		CreatedAt:   info.CreatedAt,
-		Labels:      info.Labels,
-		State:       ContainerStateUnknown,
-		Status:      "unknown",
+		ID:        info.ID,
+		Image:     info.Image,
+		CreatedAt: info.CreatedAt,
+		Labels:    info.Labels,
+		State:     ContainerStateUnknown,
+		Status:    "unknown",
 	}
 
 	// Get container name from labels

@@ -323,7 +323,7 @@ func generateBootstrapTokens(coord *coordinator.Coordinator, logger *zap.Logger)
 			agent.Region,
 			agent.Zone,
 			365*24*time.Hour, // 1 year validity
-			999, // max uses
+			999,              // max uses
 		)
 		if err != nil {
 			logger.Warn("Failed to generate bootstrap token",

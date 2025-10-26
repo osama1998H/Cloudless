@@ -32,9 +32,9 @@ type SPIFFEIdentity struct {
 type IdentityType string
 
 const (
-	NodeIdentity      IdentityType = "node"
-	WorkloadIdentity  IdentityType = "workload"
-	ServiceIdentity   IdentityType = "service"
+	NodeIdentity       IdentityType = "node"
+	WorkloadIdentity   IdentityType = "workload"
+	ServiceIdentity    IdentityType = "service"
 	ControllerIdentity IdentityType = "controller"
 )
 
@@ -195,10 +195,10 @@ func ExtractSPIFFEIDFromContext(ctx context.Context) (*SPIFFEIdentity, error) {
 
 // SPIFFEVerifier verifies SPIFFE identities
 type SPIFFEVerifier struct {
-	logger          *zap.Logger
-	allowedTypes    []IdentityType
-	allowedIDs      map[string]bool
-	trustDomain     string
+	logger       *zap.Logger
+	allowedTypes []IdentityType
+	allowedIDs   map[string]bool
+	trustDomain  string
 }
 
 // NewSPIFFEVerifier creates a new SPIFFE verifier

@@ -39,13 +39,13 @@ type Store struct {
 
 // Config contains configuration for the Raft store
 type Config struct {
-	RaftDir       string
-	RaftBind      string
-	RaftID        string
-	Bootstrap     bool
-	Logger        *zap.Logger
-	LocalID       raft.ServerID
-	EnableSingle  bool
+	RaftDir        string
+	RaftBind       string
+	RaftID         string
+	Bootstrap      bool
+	Logger         *zap.Logger
+	LocalID        raft.ServerID
+	EnableSingle   bool
 	SnapshotRetain int
 }
 

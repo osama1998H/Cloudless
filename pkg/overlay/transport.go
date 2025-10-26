@@ -57,12 +57,12 @@ func (t *QUICTransport) Listen(ctx context.Context, addr string) error {
 	}
 
 	quicConfig := &quic.Config{
-		MaxIdleTimeout:                 t.config.MaxIdleTimeout,
-		MaxIncomingStreams:             int64(t.config.MaxStreamsPerConn),
-		MaxIncomingUniStreams:          int64(t.config.MaxStreamsPerConn),
-		KeepAlivePeriod:                t.config.KeepAliveInterval,
-		EnableDatagrams:                true,
-		Allow0RTT:                      false,
+		MaxIdleTimeout:        t.config.MaxIdleTimeout,
+		MaxIncomingStreams:    int64(t.config.MaxStreamsPerConn),
+		MaxIncomingUniStreams: int64(t.config.MaxStreamsPerConn),
+		KeepAlivePeriod:       t.config.KeepAliveInterval,
+		EnableDatagrams:       true,
+		Allow0RTT:             false,
 	}
 
 	listener, err := quic.Listen(udpConn, t.tlsConfig, quicConfig)
@@ -161,12 +161,12 @@ func (t *QUICTransport) Connect(ctx context.Context, peerID string, addr string)
 	)
 
 	quicConfig := &quic.Config{
-		MaxIdleTimeout:         t.config.MaxIdleTimeout,
-		MaxIncomingStreams:     int64(t.config.MaxStreamsPerConn),
-		MaxIncomingUniStreams:  int64(t.config.MaxStreamsPerConn),
-		KeepAlivePeriod:        t.config.KeepAliveInterval,
-		EnableDatagrams:        true,
-		Allow0RTT:              false,
+		MaxIdleTimeout:        t.config.MaxIdleTimeout,
+		MaxIncomingStreams:    int64(t.config.MaxStreamsPerConn),
+		MaxIncomingUniStreams: int64(t.config.MaxStreamsPerConn),
+		KeepAlivePeriod:       t.config.KeepAliveInterval,
+		EnableDatagrams:       true,
+		Allow0RTT:             false,
 	}
 
 	conn, err := quic.DialAddr(ctx, addr, t.tlsConfig, quicConfig)

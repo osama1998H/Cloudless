@@ -80,7 +80,7 @@ type Chunk struct {
 	Offset      int64  // Offset within parent object
 	Replicas    []string
 	CreatedAt   time.Time
-	RefCount    int    // Number of objects referencing this chunk
+	RefCount    int // Number of objects referencing this chunk
 	Compressed  bool
 	ContentHash string // Original content hash before compression
 }
@@ -101,10 +101,10 @@ type Replica struct {
 type VolumeState string
 
 const (
-	VolumeStateCreated  VolumeState = "created"
-	VolumeStateMounted  VolumeState = "mounted"
-	VolumeStateDeleted  VolumeState = "deleted"
-	VolumeStateFailed   VolumeState = "failed"
+	VolumeStateCreated VolumeState = "created"
+	VolumeStateMounted VolumeState = "mounted"
+	VolumeStateDeleted VolumeState = "deleted"
+	VolumeStateFailed  VolumeState = "failed"
 )
 
 // Volume represents a node-local ephemeral volume

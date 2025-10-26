@@ -43,9 +43,9 @@ type ProbeConfig struct {
 
 // HTTPProbe represents an HTTP health check
 type HTTPProbe struct {
-	Path   string
-	Port   int32
-	Scheme string // HTTP or HTTPS
+	Path    string
+	Port    int32
+	Scheme  string // HTTP or HTTPS
 	Headers map[string]string
 }
 
@@ -61,9 +61,9 @@ type ExecProbe struct {
 
 // ProbeResult represents the result of a health probe execution
 type ProbeResult struct {
-	Success         bool
-	Message         string
-	LastProbeTime   time.Time
+	Success              bool
+	Message              string
+	LastProbeTime        time.Time
 	ConsecutiveSuccesses int32
 	ConsecutiveFailures  int32
 }

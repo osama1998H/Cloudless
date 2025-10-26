@@ -98,10 +98,10 @@ type RolloutPlan struct {
 
 // RolloutPhaseAction represents an action in a rollout phase
 type RolloutPhaseAction struct {
-	Phase          RolloutPhase
-	Action         string // "start", "stop", "wait"
-	ReplicaCount   int
-	WaitDuration   time.Duration
+	Phase           RolloutPhase
+	Action          string // "start", "stop", "wait"
+	ReplicaCount    int
+	WaitDuration    time.Duration
 	AllowedFailures int
 }
 

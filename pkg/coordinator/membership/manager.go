@@ -53,17 +53,17 @@ const (
 
 // Manager manages node membership in the cluster
 type Manager struct {
-	store          *raft.Store
-	tokenManager   *mtls.TokenManager
-	certManager    *mtls.CertificateManager
-	logger         *zap.Logger
-	nodes          map[string]*NodeInfo
-	healthMonitor  *HealthMonitor
-	scoringEngine  *ScoringEngine
+	store         *raft.Store
+	tokenManager  *mtls.TokenManager
+	certManager   *mtls.CertificateManager
+	logger        *zap.Logger
+	nodes         map[string]*NodeInfo
+	healthMonitor *HealthMonitor
+	scoringEngine *ScoringEngine
 
 	// Workload assignment tracking
 	pendingAssignments map[string][]*api.WorkloadAssignment // nodeID -> assignments
-	pendingCommands    map[string][]string                 // nodeID -> commands
+	pendingCommands    map[string][]string                  // nodeID -> commands
 	assignmentMu       sync.RWMutex                         // protects assignment maps
 
 	mu     sync.RWMutex
@@ -72,32 +72,32 @@ type Manager struct {
 
 // NodeInfo represents comprehensive node information
 type NodeInfo struct {
-	ID                string              `json:"id"`
-	Name              string              `json:"name"`
-	Region            string              `json:"region"`
-	Zone              string              `json:"zone"`
-	State             string              `json:"state"`
-	LastHeartbeat     time.Time           `json:"last_heartbeat"`
-	EnrolledAt        time.Time           `json:"enrolled_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Region        string    `json:"region"`
+	Zone          string    `json:"zone"`
+	State         string    `json:"state"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+	EnrolledAt    time.Time `json:"enrolled_at"`
 
 	// CLD-REQ-002: Membership convergence timing tracking
-	JoinStartedAt     time.Time           `json:"join_started_at,omitempty"`
-	JoinConvergedAt   time.Time           `json:"join_converged_at,omitempty"`
-	LeaveStartedAt    time.Time           `json:"leave_started_at,omitempty"`
-	LeaveConvergedAt  time.Time           `json:"leave_converged_at,omitempty"`
+	JoinStartedAt    time.Time `json:"join_started_at,omitempty"`
+	JoinConvergedAt  time.Time `json:"join_converged_at,omitempty"`
+	LeaveStartedAt   time.Time `json:"leave_started_at,omitempty"`
+	LeaveConvergedAt time.Time `json:"leave_converged_at,omitempty"`
 
-	Capabilities      NodeCapabilities    `json:"capabilities"`
-	Capacity          ResourceCapacity    `json:"capacity"`
-	Usage             ResourceUsage       `json:"usage"`
-	Labels            map[string]string   `json:"labels"`
-	Taints            []Taint             `json:"taints"`
-	Certificate       *mtls.Certificate   `json:"-"`
-	ReliabilityScore  float64             `json:"reliability_score"`
-	Fragments         []FragmentInfo      `json:"fragments"`
-	Containers        []ContainerInfo     `json:"containers"`
-	NetworkInfo       NetworkInfo         `json:"network_info"`
-	Conditions        []NodeCondition     `json:"conditions"`
-	HeartbeatInterval time.Duration       `json:"heartbeat_interval"`
+	Capabilities      NodeCapabilities  `json:"capabilities"`
+	Capacity          ResourceCapacity  `json:"capacity"`
+	Usage             ResourceUsage     `json:"usage"`
+	Labels            map[string]string `json:"labels"`
+	Taints            []Taint           `json:"taints"`
+	Certificate       *mtls.Certificate `json:"-"`
+	ReliabilityScore  float64           `json:"reliability_score"`
+	Fragments         []FragmentInfo    `json:"fragments"`
+	Containers        []ContainerInfo   `json:"containers"`
+	NetworkInfo       NetworkInfo       `json:"network_info"`
+	Conditions        []NodeCondition   `json:"conditions"`
+	HeartbeatInterval time.Duration     `json:"heartbeat_interval"`
 }
 
 // NodeCapabilities describes what a node can do
@@ -166,7 +166,7 @@ type NetworkInfo struct {
 
 // NodeCondition represents a condition of a node
 type NodeCondition struct {
-	Type           string    `json:"type"` // Ready, MemoryPressure, DiskPressure, NetworkUnavailable
+	Type           string    `json:"type"`   // Ready, MemoryPressure, DiskPressure, NetworkUnavailable
 	Status         string    `json:"status"` // True, False, Unknown
 	Reason         string    `json:"reason"`
 	Message        string    `json:"message"`
@@ -175,10 +175,10 @@ type NodeCondition struct {
 
 // ManagerConfig contains configuration for the membership manager
 type ManagerConfig struct {
-	Store         *raft.Store
-	TokenManager  *mtls.TokenManager
-	CertManager   *mtls.CertificateManager
-	Logger        *zap.Logger
+	Store        *raft.Store
+	TokenManager *mtls.TokenManager
+	CertManager  *mtls.CertificateManager
+	Logger       *zap.Logger
 }
 
 // NewManager creates a new membership manager
@@ -317,10 +317,10 @@ func (m *Manager) EnrollNode(ctx context.Context, req *api.EnrollNodeRequest) (*
 		// CLD-REQ-002: Track join convergence timing
 		JoinStartedAt: now,
 
-		Labels:        req.Labels,
-		Certificate:   cert,
+		Labels:            req.Labels,
+		Certificate:       cert,
 		HeartbeatInterval: DefaultHeartbeatInterval,
-		ReliabilityScore: 1.0, // Start with perfect score
+		ReliabilityScore:  1.0, // Start with perfect score
 	}
 
 	// Set capabilities
@@ -409,6 +409,39 @@ func (m *Manager) ProcessHeartbeat(ctx context.Context, req *api.HeartbeatReques
 
 		// CLD-REQ-002: Emit join convergence metric
 		observability.MembershipJoinConvergenceSeconds.Observe(convergenceTime.Seconds())
+	}
+
+	// Handle recovery from offline state
+	if node.State == StateOffline {
+		previousState := node.State
+		node.State = StateReady
+
+		// Track recovery time (time since node was marked offline)
+		var recoveryTime time.Duration
+		if !node.LeaveConvergedAt.IsZero() {
+			recoveryTime = time.Since(node.LeaveConvergedAt)
+		}
+
+		m.logger.Info("Node recovered from offline state",
+			zap.String("node_id", req.NodeId),
+			zap.String("previous_state", previousState),
+			zap.Duration("offline_duration", recoveryTime),
+			zap.Time("went_offline_at", node.LeaveConvergedAt),
+		)
+
+		// Update conditions
+		node.Conditions = append(node.Conditions, NodeCondition{
+			Type:           "Ready",
+			Status:         "True",
+			Reason:         "HeartbeatResumed",
+			Message:        fmt.Sprintf("Node recovered after %v offline", recoveryTime),
+			LastTransition: time.Now(),
+		})
+
+		// Emit recovery metric
+		if recoveryTime > 0 {
+			observability.MembershipNodeRecoverySeconds.Observe(recoveryTime.Seconds())
+		}
 	}
 
 	// Update resource usage

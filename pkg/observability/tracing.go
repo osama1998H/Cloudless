@@ -20,12 +20,12 @@ import (
 
 // TracerConfig holds configuration for distributed tracing
 type TracerConfig struct {
-	Enabled      bool
-	Endpoint     string
-	ServiceName  string
+	Enabled        bool
+	Endpoint       string
+	ServiceName    string
 	ServiceVersion string
-	SampleRate   float64
-	Insecure     bool
+	SampleRate     float64
+	Insecure       bool
 }
 
 // TracerProvider wraps the OpenTelemetry tracer provider

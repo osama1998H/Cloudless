@@ -101,9 +101,9 @@ func (ca *CA) generateCA(organization, country string) error {
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization:  []string{organization},
-			Country:       []string{country},
-			CommonName:    "Cloudless CA",
+			Organization: []string{organization},
+			Country:      []string{country},
+			CommonName:   "Cloudless CA",
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year validity

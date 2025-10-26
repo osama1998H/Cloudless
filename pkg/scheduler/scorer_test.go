@@ -11,11 +11,11 @@ import (
 func TestScoreNode(t *testing.T) {
 	// Create scorer with default weights
 	scorer := &Scorer{
-		LocalityWeight:        0.3,
-		ReliabilityWeight:     0.25,
-		CostWeight:            0.15,
-		UtilizationWeight:     0.2,
-		NetworkPenaltyWeight:  0.1,
+		LocalityWeight:       0.3,
+		ReliabilityWeight:    0.25,
+		CostWeight:           0.15,
+		UtilizationWeight:    0.2,
+		NetworkPenaltyWeight: 0.1,
 	}
 
 	tests := []struct {
@@ -38,10 +38,10 @@ func TestScoreNode(t *testing.T) {
 				ReliabilityScore: 0.95,
 			},
 			req: &WorkloadRequest{
-				Zone:             "us-east-1a",
-				Region:           "us-east",
-				CPUMillicores:    500,
-				MemoryBytes:      512 * 1024 * 1024,
+				Zone:          "us-east-1a",
+				Region:        "us-east",
+				CPUMillicores: 500,
+				MemoryBytes:   512 * 1024 * 1024,
 			},
 			minScore: 80.0,
 			maxScore: 100.0,
@@ -59,10 +59,10 @@ func TestScoreNode(t *testing.T) {
 				ReliabilityScore: 0.95,
 			},
 			req: &WorkloadRequest{
-				Zone:             "us-east-1a",
-				Region:           "us-east",
-				CPUMillicores:    500,
-				MemoryBytes:      512 * 1024 * 1024,
+				Zone:          "us-east-1a",
+				Region:        "us-east",
+				CPUMillicores: 500,
+				MemoryBytes:   512 * 1024 * 1024,
 			},
 			minScore: 60.0,
 			maxScore: 85.0,
@@ -80,10 +80,10 @@ func TestScoreNode(t *testing.T) {
 				ReliabilityScore: 0.95,
 			},
 			req: &WorkloadRequest{
-				Zone:             "us-east-1a",
-				Region:           "us-east",
-				CPUMillicores:    500,
-				MemoryBytes:      512 * 1024 * 1024,
+				Zone:          "us-east-1a",
+				Region:        "us-east",
+				CPUMillicores: 500,
+				MemoryBytes:   512 * 1024 * 1024,
 			},
 			minScore: 50.0,
 			maxScore: 75.0,
@@ -101,10 +101,10 @@ func TestScoreNode(t *testing.T) {
 				ReliabilityScore: 0.5, // Low reliability
 			},
 			req: &WorkloadRequest{
-				Zone:             "us-east-1a",
-				Region:           "us-east",
-				CPUMillicores:    500,
-				MemoryBytes:      512 * 1024 * 1024,
+				Zone:          "us-east-1a",
+				Region:        "us-east",
+				CPUMillicores: 500,
+				MemoryBytes:   512 * 1024 * 1024,
 			},
 			minScore: 60.0,
 			maxScore: 80.0,
@@ -201,7 +201,7 @@ func TestCalculateUtilizationScore(t *testing.T) {
 			node: &NodeInfo{
 				CPUMillicores: 8000,
 				MemoryBytes:   16 * 1024 * 1024 * 1024,
-				UsedCPU:       2000, // 25% CPU
+				UsedCPU:       2000,                   // 25% CPU
 				UsedMemory:    4 * 1024 * 1024 * 1024, // 25% memory
 			},
 			expectedScore: 100.0,
@@ -212,7 +212,7 @@ func TestCalculateUtilizationScore(t *testing.T) {
 			node: &NodeInfo{
 				CPUMillicores: 8000,
 				MemoryBytes:   16 * 1024 * 1024 * 1024,
-				UsedCPU:       4000, // 50% CPU
+				UsedCPU:       4000,                   // 50% CPU
 				UsedMemory:    8 * 1024 * 1024 * 1024, // 50% memory
 			},
 			expectedScore: 75.0,
@@ -223,7 +223,7 @@ func TestCalculateUtilizationScore(t *testing.T) {
 			node: &NodeInfo{
 				CPUMillicores: 8000,
 				MemoryBytes:   16 * 1024 * 1024 * 1024,
-				UsedCPU:       7000, // 87.5% CPU
+				UsedCPU:       7000,                    // 87.5% CPU
 				UsedMemory:    14 * 1024 * 1024 * 1024, // 87.5% memory
 			},
 			expectedScore: 30.0,
@@ -246,34 +246,34 @@ func TestCalculateReliabilityScore(t *testing.T) {
 	scorer := &Scorer{}
 
 	tests := []struct {
-		name              string
-		reliabilityScore  float64
-		expectedScore     float64
+		name             string
+		reliabilityScore float64
+		expectedScore    float64
 	}{
 		{
-			name:              "perfect reliability",
-			reliabilityScore:  1.0,
-			expectedScore:     100.0,
+			name:             "perfect reliability",
+			reliabilityScore: 1.0,
+			expectedScore:    100.0,
 		},
 		{
-			name:              "high reliability",
-			reliabilityScore:  0.95,
-			expectedScore:     95.0,
+			name:             "high reliability",
+			reliabilityScore: 0.95,
+			expectedScore:    95.0,
 		},
 		{
-			name:              "medium reliability",
-			reliabilityScore:  0.7,
-			expectedScore:     70.0,
+			name:             "medium reliability",
+			reliabilityScore: 0.7,
+			expectedScore:    70.0,
 		},
 		{
-			name:              "low reliability",
-			reliabilityScore:  0.3,
-			expectedScore:     30.0,
+			name:             "low reliability",
+			reliabilityScore: 0.3,
+			expectedScore:    30.0,
 		},
 		{
-			name:              "zero reliability",
-			reliabilityScore:  0.0,
-			expectedScore:     0.0,
+			name:             "zero reliability",
+			reliabilityScore: 0.0,
+			expectedScore:    0.0,
 		},
 	}
 
@@ -333,7 +333,7 @@ func TestHasCapacity(t *testing.T) {
 				CPUMillicores: 8000,
 				MemoryBytes:   16 * 1024 * 1024 * 1024,
 				UsedCPU:       1000,
-				UsedMemory:    15 * 1024 * 1024 * 1024 + 512*1024*1024,
+				UsedMemory:    15*1024*1024*1024 + 512*1024*1024,
 			},
 			req: &WorkloadRequest{
 				CPUMillicores: 500,
@@ -370,11 +370,11 @@ func TestHasCapacity(t *testing.T) {
 
 func TestWeightedScore(t *testing.T) {
 	scorer := &Scorer{
-		LocalityWeight:        0.3,
-		ReliabilityWeight:     0.25,
-		CostWeight:            0.15,
-		UtilizationWeight:     0.2,
-		NetworkPenaltyWeight:  0.1,
+		LocalityWeight:       0.3,
+		ReliabilityWeight:    0.25,
+		CostWeight:           0.15,
+		UtilizationWeight:    0.2,
+		NetworkPenaltyWeight: 0.1,
 	}
 
 	// Verify weights sum to 1.0

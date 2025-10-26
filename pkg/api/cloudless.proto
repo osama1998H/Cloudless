@@ -444,6 +444,24 @@ message HeartbeatRequest {
   ResourceUsage usage = 3;         // Current resource usage
   repeated Fragment fragments = 4;
   repeated ContainerStatus containers = 5;
+
+  // CLD-REQ-032: Health probe status for containers
+  repeated ContainerHealth container_health = 6;
+}
+
+// CLD-REQ-032: Health probe status for a single container
+message ContainerHealth {
+  string container_id = 1;
+
+  // Liveness probe status
+  bool liveness_healthy = 2;
+  int32 liveness_consecutive_failures = 3;
+  int64 liveness_last_check_time = 4;
+
+  // Readiness probe status
+  bool readiness_healthy = 5;
+  int32 readiness_consecutive_failures = 6;
+  int64 readiness_last_check_time = 7;
 }
 
 message HeartbeatResponse {

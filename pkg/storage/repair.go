@@ -19,11 +19,11 @@ type RepairEngine struct {
 	replicationManager *ReplicationManager
 	chunkStore         *ChunkStore
 
-	repairQueue    chan *RepairTask
-	activeRepairs  sync.Map // taskID -> *RepairTask
-	repairHistory  []RepairTask
-	merkleCache    sync.Map // nodeID -> *MerkleTree
-	repairMetrics  RepairMetrics
+	repairQueue   chan *RepairTask
+	activeRepairs sync.Map // taskID -> *RepairTask
+	repairHistory []RepairTask
+	merkleCache   sync.Map // nodeID -> *MerkleTree
+	repairMetrics RepairMetrics
 
 	ctx    context.Context
 	cancel context.CancelFunc

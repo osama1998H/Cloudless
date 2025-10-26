@@ -270,9 +270,9 @@ type FSMSnapshot struct {
 
 // SnapshotData represents the serialized snapshot data
 type SnapshotData struct {
-	Version   int                `json:"version"`
-	Timestamp time.Time          `json:"timestamp"`
-	Data      map[string]*Entry  `json:"data"`
+	Version   int               `json:"version"`
+	Timestamp time.Time         `json:"timestamp"`
+	Data      map[string]*Entry `json:"data"`
 }
 
 // Persist writes the snapshot to the given sink

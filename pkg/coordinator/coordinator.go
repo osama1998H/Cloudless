@@ -241,16 +241,16 @@ func New(config *Config) (*Coordinator, error) {
 	// Initialize Scheduler
 	config.Logger.Info("Initializing Scheduler")
 	schedulerConfig := &scheduler.SchedulerConfig{
-		LocalityWeight:        config.SchedulerConfig.LocalityWeight,
-		ReliabilityWeight:     config.SchedulerConfig.ReliabilityWeight,
-		CostWeight:            config.SchedulerConfig.CostWeight,
-		UtilizationWeight:     config.SchedulerConfig.UtilizationWeight,
-		NetworkPenaltyWeight:  config.SchedulerConfig.NetworkPenaltyWeight,
-		MaxRetries:         5,
-		RetryBackoff:       5 * time.Second,
-		SpreadPolicy:       "zone",
-		PackingStrategy:    "binpack",
-		EnforcePlacement:   false,
+		LocalityWeight:       config.SchedulerConfig.LocalityWeight,
+		ReliabilityWeight:    config.SchedulerConfig.ReliabilityWeight,
+		CostWeight:           config.SchedulerConfig.CostWeight,
+		UtilizationWeight:    config.SchedulerConfig.UtilizationWeight,
+		NetworkPenaltyWeight: config.SchedulerConfig.NetworkPenaltyWeight,
+		MaxRetries:           5,
+		RetryBackoff:         5 * time.Second,
+		SpreadPolicy:         "zone",
+		PackingStrategy:      "binpack",
+		EnforcePlacement:     false,
 	}
 	schedulerInstance, err := scheduler.NewScheduler(membershipMgr, schedulerConfig, config.Logger)
 	if err != nil {

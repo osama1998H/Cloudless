@@ -23,7 +23,7 @@ func main() {
 	}
 
 	// Generate tokens for the 3 agents
-	agents := []struct{
+	agents := []struct {
 		NodeID   string
 		NodeName string
 		Region   string
@@ -41,7 +41,7 @@ func main() {
 			agent.Region,
 			agent.Zone,
 			365*24*time.Hour, // 1 year
-			999, // max uses
+			999,              // max uses
 		)
 		if err != nil {
 			panic(err)

@@ -5,6 +5,9 @@ agent:
   bind_address: "0.0.0.0:8090"
   data_dir: "/data"
 
+  # CLD-REQ-032: Enable health probe monitoring (automated restart and traffic gating)
+  enable_health_probes: true
+
 # Coordinator connection
 coordinator:
   address: "coordinator:8080"

@@ -53,10 +53,13 @@ type Config struct {
 	TLSCert *tls.Certificate
 
 	// TLS configuration for coordinator connection
-	CertificateFile string // Path to client certificate
-	KeyFile         string // Path to client key
-	CAFile          string // Path to CA certificate
-	InsecureSkipVerify bool // Skip TLS verification (dev only!)
+	CertificateFile    string // Path to client certificate
+	KeyFile            string // Path to client key
+	CAFile             string // Path to CA certificate
+	InsecureSkipVerify bool   // Skip TLS verification (dev only!)
+
+	// CLD-REQ-032: Health probe feature flag (gradual rollout)
+	EnableHealthProbes bool // Enable automated health probe monitoring
 }
 
 // Validate validates the agent configuration
@@ -103,9 +106,14 @@ type Agent struct {
 	// Components
 	runtime         runtime.Runtime
 	probeExecutor   *runtime.ProbeExecutor
+	healthMonitor   *HealthMonitor
 	resourceMonitor *ResourceMonitor
 	metricsStorage  *MetricsStorage
 	coordinatorConn *grpc.ClientConn
+
+	// CLD-REQ-032: Container health tracking for heartbeat reporting
+	containerHealthMu sync.RWMutex
+	containerHealth   map[string]*api.ContainerHealth // containerID -> health status
 
 	// Overlay networking components
 	transport       *overlay.QUICTransport
@@ -165,6 +173,77 @@ func New(config *Config) (*Agent, error) {
 	// Initialize health probe executor
 	config.Logger.Info("Initializing health probe executor")
 	a.probeExecutor = runtime.NewProbeExecutor(a.runtime, config.Logger)
+
+	// CLD-REQ-032: Initialize health monitor and container health tracking
+	if config.EnableHealthProbes {
+		config.Logger.Info("Initializing health monitor")
+
+		// Initialize container health map
+		a.containerHealth = make(map[string]*api.ContainerHealth)
+
+		// Create health monitor
+		a.healthMonitor = NewHealthMonitor(a.probeExecutor, a.runtime, config.Logger)
+
+		// Set up liveness failure callback
+		a.healthMonitor.SetLivenessFailureCallback(func(containerID string, consecutiveFailures int) {
+			a.containerHealthMu.Lock()
+			defer a.containerHealthMu.Unlock()
+
+			// Update or create health entry
+			if health, exists := a.containerHealth[containerID]; exists {
+				health.LivenessConsecutiveFailures = int32(consecutiveFailures)
+				health.LivenessHealthy = false
+				health.LivenessLastCheckTime = time.Now().Unix()
+			} else {
+				a.containerHealth[containerID] = &api.ContainerHealth{
+					ContainerId:                  containerID,
+					LivenessHealthy:              false,
+					LivenessConsecutiveFailures:  int32(consecutiveFailures),
+					LivenessLastCheckTime:        time.Now().Unix(),
+					ReadinessHealthy:             false,
+					ReadinessConsecutiveFailures: 0,
+					ReadinessLastCheckTime:       0,
+				}
+			}
+
+			a.logger.Info("Liveness probe failure recorded",
+				zap.String("container_id", containerID),
+				zap.Int("consecutive_failures", consecutiveFailures),
+			)
+		})
+
+		// Set up readiness change callback
+		a.healthMonitor.SetReadinessChangeCallback(func(containerID string, healthy bool) {
+			a.containerHealthMu.Lock()
+			defer a.containerHealthMu.Unlock()
+
+			// Update or create health entry
+			if health, exists := a.containerHealth[containerID]; exists {
+				health.ReadinessHealthy = healthy
+				if healthy {
+					health.ReadinessConsecutiveFailures = 0
+				}
+				health.ReadinessLastCheckTime = time.Now().Unix()
+			} else {
+				a.containerHealth[containerID] = &api.ContainerHealth{
+					ContainerId:                  containerID,
+					LivenessHealthy:              false,
+					LivenessConsecutiveFailures:  0,
+					LivenessLastCheckTime:        0,
+					ReadinessHealthy:             healthy,
+					ReadinessConsecutiveFailures: 0,
+					ReadinessLastCheckTime:       time.Now().Unix(),
+				}
+			}
+
+			a.logger.Info("Readiness status changed",
+				zap.String("container_id", containerID),
+				zap.Bool("healthy", healthy),
+			)
+		})
+	} else {
+		config.Logger.Info("Health probe monitoring disabled (EnableHealthProbes=false)")
+	}
 
 	// Initialize resource monitor
 	config.Logger.Info("Initializing resource monitor")
@@ -360,6 +439,12 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// Start metrics collection loop
 	go a.metricsCollectionLoop(ctx)
+
+	// CLD-REQ-032: Start health monitor if enabled
+	if a.healthMonitor != nil {
+		a.logger.Info("Starting health monitor")
+		go a.healthMonitor.Start(ctx)
+	}
 
 	a.logger.Info("Agent started successfully")
 	return nil
@@ -651,6 +736,9 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 		}
 	}
 
+	// CLD-REQ-032: Collect container health status
+	containerHealthList := a.collectContainerHealth()
+
 	// Prepare heartbeat request
 	// CLD-REQ-010: Include both capacity (available resources) and usage (consumed resources)
 	heartbeatReq := &api.HeartbeatRequest{
@@ -670,7 +758,8 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 			BandwidthBps:  usage.BandwidthBPS,
 			GpuCount:      int32(usage.GPU),
 		},
-		Containers: containerStatuses,
+		Containers:      containerStatuses,
+		ContainerHealth: containerHealthList, // CLD-REQ-032: Health probe status
 	}
 
 	// Create coordinator client
@@ -1031,10 +1120,10 @@ func (a *Agent) runWorkload(ctx context.Context, workload *api.Workload, fragmen
 		Args:    spec.Args,
 		Env:     spec.Env,
 		Labels: map[string]string{
-			"workload.id":       workload.Id,
-			"workload.name":     workload.Name,
+			"workload.id":        workload.Id,
+			"workload.name":      workload.Name,
 			"workload.namespace": workload.Namespace,
-			"fragment.id":       fragmentID,
+			"fragment.id":        fragmentID,
 		},
 		Annotations: workload.Annotations,
 		Resources:   resources,
@@ -1061,6 +1150,53 @@ func (a *Agent) runWorkload(ctx context.Context, workload *api.Workload, fragmen
 		zap.String("workload_id", workload.Id),
 		zap.String("container_id", container.ID),
 	)
+
+	// CLD-REQ-032: Start health probes if enabled
+	if a.config.EnableHealthProbes && (spec.LivenessProbe != nil || spec.ReadinessProbe != nil) {
+		// Get container IP for probe configuration
+		containerIP, err := a.runtime.GetContainerIP(ctx, container.ID)
+		if err != nil {
+			a.logger.Warn("Failed to get container IP for health probes",
+				zap.String("container_id", container.ID),
+				zap.Error(err),
+			)
+			// Continue without probes - non-fatal error
+		} else {
+			// Extract probe configurations
+			livenessConfig, readinessConfig, err := a.extractProbeConfigs(spec, container.ID, containerIP)
+			if err != nil {
+				a.logger.Error("Failed to extract probe configs",
+					zap.String("container_id", container.ID),
+					zap.Error(err),
+				)
+				// Continue without probes - non-fatal error
+			} else {
+				// Log probe startup
+				if livenessConfig != nil {
+					a.logger.Info("Starting liveness probe",
+						zap.String("container_id", container.ID),
+						zap.String("probe_type", string(livenessConfig.Type)),
+						zap.Int32("failure_threshold", livenessConfig.FailureThreshold),
+					)
+				}
+				if readinessConfig != nil {
+					a.logger.Info("Starting readiness probe",
+						zap.String("container_id", container.ID),
+						zap.String("probe_type", string(readinessConfig.Type)),
+						zap.Int32("failure_threshold", readinessConfig.FailureThreshold),
+					)
+				}
+
+				// Start probes via ProbeExecutor (starts both liveness and readiness)
+				a.probeExecutor.StartProbing(container.ID, containerIP, livenessConfig, readinessConfig)
+
+				// Register container with health monitor for automated actions
+				if a.healthMonitor != nil {
+					a.healthMonitor.RegisterContainer(container.ID, livenessConfig, readinessConfig)
+				}
+			}
+		}
+	}
 
 	return nil
 }
@@ -1104,7 +1240,7 @@ func (a *Agent) stopWorkload(ctx context.Context, workload *api.Workload, fragme
 	var containerID string
 	for _, container := range containers {
 		if container.Labels["workload.id"] == workload.Id &&
-		   container.Labels["fragment.id"] == fragmentID {
+			container.Labels["fragment.id"] == fragmentID {
 			containerID = container.ID
 			break
 		}
@@ -1117,6 +1253,14 @@ func (a *Agent) stopWorkload(ctx context.Context, workload *api.Workload, fragme
 		)
 		return nil
 	}
+
+	// CLD-REQ-032: Unregister container from health monitoring
+	if a.healthMonitor != nil {
+		a.healthMonitor.UnregisterContainer(containerID)
+	}
+
+	// Clear probe results
+	a.probeExecutor.ClearProbeResults(containerID)
 
 	// Stop container with 30 second timeout
 	if err := a.runtime.StopContainer(ctx, containerID, 30*time.Second); err != nil {
@@ -1137,6 +1281,159 @@ func (a *Agent) stopWorkload(ctx context.Context, workload *api.Workload, fragme
 	)
 
 	return nil
+}
+
+// extractProbeConfigs extracts liveness and readiness probe configs from WorkloadSpec
+//
+// CLD-REQ-032: Converts API health check definitions to runtime probe configs.
+//
+// Parameters:
+//   - spec: WorkloadSpec containing liveness_probe and readiness_probe
+//   - containerID: Container identifier for probe tracking
+//   - containerIP: Container IP address for probe targets
+//
+// Returns nil configs if probes are not defined (graceful degradation).
+func (a *Agent) extractProbeConfigs(
+	spec *api.WorkloadSpec,
+	containerID string,
+	containerIP string,
+) (livenessConfig, readinessConfig *runtime.ProbeConfig, err error) {
+	// Extract liveness probe
+	if spec.LivenessProbe != nil {
+		livenessConfig, err = a.convertHealthCheck(spec.LivenessProbe, containerID, containerIP, "liveness")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to convert liveness probe: %w", err)
+		}
+	}
+
+	// Extract readiness probe
+	if spec.ReadinessProbe != nil {
+		readinessConfig, err = a.convertHealthCheck(spec.ReadinessProbe, containerID, containerIP, "readiness")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to convert readiness probe: %w", err)
+		}
+	}
+
+	return livenessConfig, readinessConfig, nil
+}
+
+// convertHealthCheck converts API HealthCheck to runtime ProbeConfig
+//
+// Handles conversion of:
+//   - Probe type (HTTP, TCP, Exec)
+//   - Timing parameters (Duration -> int32 seconds)
+//   - Threshold values
+//
+// Thread Safety: Read-only operation, safe for concurrent use.
+func (a *Agent) convertHealthCheck(
+	hc *api.HealthCheck,
+	containerID string,
+	containerIP string,
+	probeType string,
+) (*runtime.ProbeConfig, error) {
+	if hc == nil {
+		return nil, nil
+	}
+
+	config := &runtime.ProbeConfig{
+		InitialDelaySeconds: int32(hc.InitialDelay.AsDuration().Seconds()),
+		PeriodSeconds:       int32(hc.Period.AsDuration().Seconds()),
+		TimeoutSeconds:      int32(hc.Timeout.AsDuration().Seconds()),
+		SuccessThreshold:    hc.SuccessThreshold,
+		FailureThreshold:    hc.FailureThreshold,
+	}
+
+	// Set defaults if not specified (per SOP §4 error handling)
+	if config.PeriodSeconds == 0 {
+		config.PeriodSeconds = 10
+	}
+	if config.TimeoutSeconds == 0 {
+		config.TimeoutSeconds = 3
+	}
+	if config.SuccessThreshold == 0 {
+		config.SuccessThreshold = 1
+	}
+	if config.FailureThreshold == 0 {
+		config.FailureThreshold = 3
+	}
+
+	// Convert probe type using oneof check
+	switch check := hc.Check.(type) {
+	case *api.HealthCheck_Http:
+		config.Type = runtime.ProbeTypeHTTP
+		config.HTTPGet = &runtime.HTTPProbe{
+			Path:    check.Http.Path,
+			Port:    check.Http.Port,
+			Scheme:  check.Http.Scheme,
+			Headers: make(map[string]string),
+		}
+
+		// Convert headers
+		for _, h := range check.Http.Headers {
+			config.HTTPGet.Headers[h.Name] = h.Value
+		}
+
+		// Replace $CONTAINER_IP placeholder
+		config.HTTPGet.Path = strings.ReplaceAll(config.HTTPGet.Path, "$CONTAINER_IP", containerIP)
+
+	case *api.HealthCheck_Tcp:
+		config.Type = runtime.ProbeTypeTCP
+		config.TCPSocket = &runtime.TCPProbe{
+			Port: check.Tcp.Port,
+		}
+
+	case *api.HealthCheck_Exec:
+		config.Type = runtime.ProbeTypeExec
+		config.Exec = &runtime.ExecProbe{
+			Command: check.Exec.Command,
+		}
+
+	default:
+		return nil, fmt.Errorf("unknown health check type for %s probe", probeType)
+	}
+
+	a.logger.Debug("Converted health check",
+		zap.String("probe_type", probeType),
+		zap.String("container_id", containerID),
+		zap.String("check_type", string(config.Type)),
+		zap.Int32("period", config.PeriodSeconds),
+		zap.Int32("timeout", config.TimeoutSeconds),
+		zap.Int32("failure_threshold", config.FailureThreshold),
+	)
+
+	return config, nil
+}
+
+// collectContainerHealth collects current health status for all containers
+//
+// CLD-REQ-032: Gathers health probe results for heartbeat reporting.
+//
+// Returns a slice of ContainerHealth messages for inclusion in heartbeat.
+// Thread-safe: Uses RLock for concurrent access.
+func (a *Agent) collectContainerHealth() []*api.ContainerHealth {
+	a.containerHealthMu.RLock()
+	defer a.containerHealthMu.RUnlock()
+
+	healthList := make([]*api.ContainerHealth, 0, len(a.containerHealth))
+	for _, health := range a.containerHealth {
+		// Create a copy to avoid race conditions
+		healthCopy := &api.ContainerHealth{
+			ContainerId:                  health.ContainerId,
+			LivenessHealthy:              health.LivenessHealthy,
+			LivenessConsecutiveFailures:  health.LivenessConsecutiveFailures,
+			LivenessLastCheckTime:        health.LivenessLastCheckTime,
+			ReadinessHealthy:             health.ReadinessHealthy,
+			ReadinessConsecutiveFailures: health.ReadinessConsecutiveFailures,
+			ReadinessLastCheckTime:       health.ReadinessLastCheckTime,
+		}
+		healthList = append(healthList, healthCopy)
+	}
+
+	a.logger.Debug("Collected container health for heartbeat",
+		zap.Int("container_count", len(healthList)),
+	)
+
+	return healthList
 }
 
 // handleCommand handles a command from the coordinator

@@ -15,12 +15,12 @@ type EventType string
 
 const (
 	// Membership events
-	EventNodeEnrolled     EventType = "node.enrolled"
-	EventNodeDrained      EventType = "node.drained"
-	EventNodeUncordoned   EventType = "node.uncordoned"
-	EventNodeOffline      EventType = "node.offline"
-	EventNodeFailed       EventType = "node.failed"
-	EventNodeRemoved      EventType = "node.removed"
+	EventNodeEnrolled   EventType = "node.enrolled"
+	EventNodeDrained    EventType = "node.drained"
+	EventNodeUncordoned EventType = "node.uncordoned"
+	EventNodeOffline    EventType = "node.offline"
+	EventNodeFailed     EventType = "node.failed"
+	EventNodeRemoved    EventType = "node.removed"
 
 	// Workload events
 	EventWorkloadCreated   EventType = "workload.created"
@@ -55,9 +55,9 @@ const (
 	EventNATTraversal          EventType = "network.nat_traversal"
 
 	// Coordinator events
-	EventLeaderElected   EventType = "coordinator.leader_elected"
-	EventLeaderStepDown  EventType = "coordinator.leader_stepdown"
-	EventRAFTSnapshot    EventType = "coordinator.raft_snapshot"
+	EventLeaderElected  EventType = "coordinator.leader_elected"
+	EventLeaderStepDown EventType = "coordinator.leader_stepdown"
+	EventRAFTSnapshot   EventType = "coordinator.raft_snapshot"
 )
 
 // EventSeverity represents the severity level of an event

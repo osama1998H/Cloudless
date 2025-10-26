@@ -15,65 +15,74 @@ import (
 // WorkloadState represents the persistent state of a workload
 type WorkloadState struct {
 	// Workload spec
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Namespace   string                 `json:"namespace"`
-	Image       string                 `json:"image"`
-	Command     []string               `json:"command,omitempty"`
-	Args        []string               `json:"args,omitempty"`
-	Env         map[string]string      `json:"env,omitempty"`
-	Volumes     []VolumeMount          `json:"volumes,omitempty"`
-	Ports       []PortMapping          `json:"ports,omitempty"`
+	ID          string                         `json:"id"`
+	Name        string                         `json:"name"`
+	Namespace   string                         `json:"namespace"`
+	Image       string                         `json:"image"`
+	Command     []string                       `json:"command,omitempty"`
+	Args        []string                       `json:"args,omitempty"`
+	Env         map[string]string              `json:"env,omitempty"`
+	Volumes     []VolumeMount                  `json:"volumes,omitempty"`
+	Ports       []PortMapping                  `json:"ports,omitempty"`
 	Resources   scheduler.ResourceRequirements `json:"resources"`
 	Placement   scheduler.PlacementPolicy      `json:"placement"`
 	Restart     scheduler.RestartPolicy        `json:"restart"`
 	Rollout     scheduler.RolloutStrategy      `json:"rollout"`
-	Priority    int32                  `json:"priority"`
-	Labels      map[string]string      `json:"labels,omitempty"`
-	Annotations map[string]string      `json:"annotations,omitempty"`
+	Priority    int32                          `json:"priority"`
+	Labels      map[string]string              `json:"labels,omitempty"`
+	Annotations map[string]string              `json:"annotations,omitempty"`
 
 	// Deployment config
 	DesiredReplicas int32 `json:"desired_replicas"`
 
 	// Runtime state
-	Status           WorkloadStatus      `json:"status"`
-	Replicas         []ReplicaState      `json:"replicas"`
-	CurrentReplicas  int32               `json:"current_replicas"`
-	ReadyReplicas    int32               `json:"ready_replicas"`
-	AvailableReplicas int32              `json:"available_replicas"`
+	Status            WorkloadStatus `json:"status"`
+	Replicas          []ReplicaState `json:"replicas"`
+	CurrentReplicas   int32          `json:"current_replicas"`
+	ReadyReplicas     int32          `json:"ready_replicas"`
+	AvailableReplicas int32          `json:"available_replicas"`
 
 	// Timestamps
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // WorkloadStatus represents the lifecycle state
 type WorkloadStatus string
 
 const (
-	WorkloadStatusPending   WorkloadStatus = "Pending"
+	WorkloadStatusPending    WorkloadStatus = "Pending"
 	WorkloadStatusScheduling WorkloadStatus = "Scheduling"
-	WorkloadStatusRunning   WorkloadStatus = "Running"
-	WorkloadStatusUpdating  WorkloadStatus = "Updating"
-	WorkloadStatusScaling   WorkloadStatus = "Scaling"
-	WorkloadStatusFailed    WorkloadStatus = "Failed"
-	WorkloadStatusCompleted WorkloadStatus = "Completed"
-	WorkloadStatusDeleting  WorkloadStatus = "Deleting"
+	WorkloadStatusRunning    WorkloadStatus = "Running"
+	WorkloadStatusUpdating   WorkloadStatus = "Updating"
+	WorkloadStatusScaling    WorkloadStatus = "Scaling"
+	WorkloadStatusFailed     WorkloadStatus = "Failed"
+	WorkloadStatusCompleted  WorkloadStatus = "Completed"
+	WorkloadStatusDeleting   WorkloadStatus = "Deleting"
 )
 
 // ReplicaState represents the state of a single replica
 type ReplicaState struct {
-	ID         string            `json:"id"`
-	NodeID     string            `json:"node_id"`
-	NodeName   string            `json:"node_name"`
-	FragmentID string            `json:"fragment_id"`
-	Status     ReplicaStatus     `json:"status"`
-	Ready      bool              `json:"ready"`
-	Message    string            `json:"message,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	StartedAt  *time.Time        `json:"started_at,omitempty"`
-	StoppedAt  *time.Time        `json:"stopped_at,omitempty"`
+	ID         string        `json:"id"`
+	NodeID     string        `json:"node_id"`
+	NodeName   string        `json:"node_name"`
+	FragmentID string        `json:"fragment_id"`
+	Status     ReplicaStatus `json:"status"`
+	Ready      bool          `json:"ready"`
+	Message    string        `json:"message,omitempty"`
+	CreatedAt  time.Time     `json:"created_at"`
+	StartedAt  *time.Time    `json:"started_at,omitempty"`
+	StoppedAt  *time.Time    `json:"stopped_at,omitempty"`
+
+	// CLD-REQ-032: Health probe status
+	LivenessHealthy              bool      `json:"liveness_healthy"`
+	LivenessConsecutiveFailures  int32     `json:"liveness_consecutive_failures"`
+	LivenessLastCheckTime        time.Time `json:"liveness_last_check_time,omitempty"`
+	ReadinessHealthy             bool      `json:"readiness_healthy"`
+	ReadinessConsecutiveFailures int32     `json:"readiness_consecutive_failures"`
+	ReadinessLastCheckTime       time.Time `json:"readiness_last_check_time,omitempty"`
+	ContainerID                  string    `json:"container_id,omitempty"` // For health data correlation
 }
 
 // ReplicaStatus represents replica state
@@ -105,10 +114,10 @@ type PortMapping struct {
 
 // WorkloadStateManager manages workload state in RAFT
 type WorkloadStateManager struct {
-	store    *raft.Store
-	logger   *zap.Logger
-	mu       sync.RWMutex
-	cache    map[string]*WorkloadState // workloadID -> state (in-memory cache)
+	store  *raft.Store
+	logger *zap.Logger
+	mu     sync.RWMutex
+	cache  map[string]*WorkloadState // workloadID -> state (in-memory cache)
 }
 
 // NewWorkloadStateManager creates a new workload state manager
@@ -351,6 +360,120 @@ func (wsm *WorkloadStateManager) UpdateReplica(ctx context.Context, workloadID, 
 	}
 
 	return wsm.SaveWorkload(ctx, workload)
+}
+
+// UpdateReplicaHealth updates health probe status for a replica
+//
+// CLD-REQ-032: Processes health data from agent heartbeats.
+//
+// Parameters:
+//   - containerID: Container identifier from heartbeat
+//   - livenessHealthy: Current liveness probe status
+//   - readinessHealthy: Current readiness probe status
+//   - livenessFailures: Consecutive liveness failures
+//   - readinessFailures: Consecutive readiness failures
+//
+// This method:
+// 1. Finds replica by containerID
+// 2. Updates health fields
+// 3. Updates Ready field based on readiness status
+// 4. Recalculates workload ReadyReplicas count
+func (wsm *WorkloadStateManager) UpdateReplicaHealth(
+	ctx context.Context,
+	containerID string,
+	livenessHealthy, readinessHealthy bool,
+	livenessFailures, readinessFailures int32,
+) error {
+	wsm.mu.Lock()
+	defer wsm.mu.Unlock()
+
+	// Find workload and replica by containerID
+	var targetWorkload *WorkloadState
+	var replicaIndex int
+	found := false
+
+	for _, workload := range wsm.cache {
+		for i, replica := range workload.Replicas {
+			if replica.ContainerID == containerID {
+				targetWorkload = workload
+				replicaIndex = i
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		wsm.logger.Debug("No replica found for container health update",
+			zap.String("container_id", containerID),
+		)
+		return nil // Not an error - container might not be tracked yet
+	}
+
+	// Update health fields
+	replica := &targetWorkload.Replicas[replicaIndex]
+	replica.LivenessHealthy = livenessHealthy
+	replica.LivenessConsecutiveFailures = livenessFailures
+	replica.LivenessLastCheckTime = time.Now()
+	replica.ReadinessHealthy = readinessHealthy
+	replica.ReadinessConsecutiveFailures = readinessFailures
+	replica.ReadinessLastCheckTime = time.Now()
+
+	// Update Ready status based on readiness (CLD-REQ-032: traffic gating)
+	previousReady := replica.Ready
+	replica.Ready = readinessHealthy
+
+	// Log readiness changes
+	if previousReady != readinessHealthy {
+		wsm.logger.Info("Replica readiness changed",
+			zap.String("workload_id", targetWorkload.ID),
+			zap.String("replica_id", replica.ID),
+			zap.String("container_id", containerID),
+			zap.Bool("previous_ready", previousReady),
+			zap.Bool("current_ready", readinessHealthy),
+		)
+	}
+
+	// Recalculate ready/available counts
+	targetWorkload.ReadyReplicas = 0
+	targetWorkload.AvailableReplicas = 0
+	for _, r := range targetWorkload.Replicas {
+		if r.Ready {
+			targetWorkload.ReadyReplicas++
+		}
+		if r.Status == ReplicaStatusRunning {
+			targetWorkload.AvailableReplicas++
+		}
+	}
+
+	// Save updated workload
+	targetWorkload.UpdatedAt = time.Now()
+
+	// Serialize to JSON
+	data, err := json.Marshal(targetWorkload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal workload: %w", err)
+	}
+
+	// Write to RAFT
+	key := fmt.Sprintf("workload:%s", targetWorkload.ID)
+	if err := wsm.store.Set(key, data); err != nil {
+		return fmt.Errorf("failed to write to RAFT: %w", err)
+	}
+
+	wsm.logger.Debug("Replica health updated",
+		zap.String("workload_id", targetWorkload.ID),
+		zap.String("replica_id", replica.ID),
+		zap.String("container_id", containerID),
+		zap.Bool("liveness_healthy", livenessHealthy),
+		zap.Bool("readiness_healthy", readinessHealthy),
+		zap.Int32("ready_replicas", targetWorkload.ReadyReplicas),
+	)
+
+	return nil
 }
 
 // RemoveReplica removes a replica from a workload

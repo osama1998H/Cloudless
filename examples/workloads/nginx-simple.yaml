@@ -1,0 +1,64 @@
+# Simple nginx workload with health probes for testing
+# This demonstrates CLD-REQ-032: Health probes drive automated restart and traffic gating
+
+apiVersion: cloudless/v1
+kind: Workload
+metadata:
+  name: nginx-test
+  namespace: default
+  labels:
+    app: nginx
+    tier: frontend
+
+spec:
+  # Container image
+  image: nginx:1.25-alpine
+
+  # Resource requirements
+  resources:
+    requests:
+      cpu_millicores: 500        # 0.5 CPU
+      memory_bytes: 536870912    # 512 MiB
+      storage_bytes: 1073741824  # 1 GiB
+    limits:
+      cpu_millicores: 1000       # 1 CPU
+      memory_bytes: 1073741824   # 1 GiB
+
+  # Number of replicas
+  replicas: 3
+
+  # Restart policy
+  restart_policy:
+    policy: ALWAYS
+    max_retries: 5
+    backoff: 30s
+
+  # Network ports
+  ports:
+    - name: http
+      container_port: 80
+      protocol: TCP
+
+  # Liveness probe - Restarts container if failing
+  liveness_probe:
+    http:
+      path: /
+      port: 80
+      scheme: HTTP
+    initial_delay: 15s    # Wait 15s after container starts
+    period: 10s           # Check every 10 seconds
+    timeout: 3s           # Timeout after 3 seconds
+    failure_threshold: 3  # Restart after 3 consecutive failures
+    success_threshold: 1  # Healthy after 1 success
+
+  # Readiness probe - Gates traffic to container
+  readiness_probe:
+    http:
+      path: /
+      port: 80
+      scheme: HTTP
+    initial_delay: 5s     # Start checking after 5s
+    period: 5s            # Check every 5 seconds
+    timeout: 2s           # Timeout after 2 seconds
+    failure_threshold: 2  # Unready after 2 consecutive failures
+    success_threshold: 1  # Ready after 1 success

@@ -17,17 +17,17 @@ type Scorer struct {
 // ScorerConfig contains scoring weights
 // PRD Formula: S = w_l*locality + w_r*reliability + w_c*cost + w_u*utilization − w_n*network_penalty
 type ScorerConfig struct {
-	LocalityWeight        float64
-	ReliabilityWeight     float64
-	CostWeight            float64
-	UtilizationWeight     float64
-	NetworkPenaltyWeight  float64  // Note: Applied as SUBTRACTION (penalty, not bonus)
+	LocalityWeight       float64
+	ReliabilityWeight    float64
+	CostWeight           float64
+	UtilizationWeight    float64
+	NetworkPenaltyWeight float64 // Note: Applied as SUBTRACTION (penalty, not bonus)
 }
 
 // ScoredNode represents a node with its score
 type ScoredNode struct {
-	Node  *membership.NodeInfo
-	Score float64
+	Node       *membership.NodeInfo
+	Score      float64
 	Components ScoreComponents
 }
 
@@ -37,14 +37,14 @@ type ScoreComponents struct {
 	ReliabilityScore float64
 	CostScore        float64
 	UtilizationScore float64
-	NetworkPenalty   float64  // Higher = worse (this is subtracted from total)
+	NetworkPenalty   float64 // Higher = worse (this is subtracted from total)
 }
 
 // NewScorer creates a new scorer
 func NewScorer(config ScorerConfig, logger *zap.Logger) *Scorer {
 	// Normalize weights
 	total := config.LocalityWeight + config.ReliabilityWeight +
-			config.CostWeight + config.UtilizationWeight + config.NetworkPenaltyWeight
+		config.CostWeight + config.UtilizationWeight + config.NetworkPenaltyWeight
 
 	if total > 0 {
 		config.LocalityWeight /= total
@@ -83,7 +83,7 @@ func (s *Scorer) ScoreNode(node *membership.NodeInfo, workload *WorkloadSpec) Sc
 		components.ReliabilityScore*s.config.ReliabilityWeight +
 		components.CostScore*s.config.CostWeight +
 		components.UtilizationScore*s.config.UtilizationWeight -
-		components.NetworkPenalty*s.config.NetworkPenaltyWeight  // SUBTRACT penalty
+		components.NetworkPenalty*s.config.NetworkPenaltyWeight // SUBTRACT penalty
 
 	// Apply affinity bonuses/penalties
 	totalScore = s.applyAffinityAdjustments(totalScore, node, workload)
@@ -241,9 +241,9 @@ func (s *Scorer) calculateUtilizationScore(node *membership.NodeInfo, workload *
 
 	// Calculate utilization after placement
 	futureCPUUtil := (float64(node.Usage.CPUMillicores) + float64(workload.Resources.Requests.CPUMillicores)) /
-					float64(node.Capacity.CPUMillicores)
+		float64(node.Capacity.CPUMillicores)
 	futureMemUtil := (float64(node.Usage.MemoryBytes) + float64(workload.Resources.Requests.MemoryBytes)) /
-					float64(node.Capacity.MemoryBytes)
+		float64(node.Capacity.MemoryBytes)
 
 	// Check if placement would overcommit
 	if futureCPUUtil > 1.0 || futureMemUtil > 1.0 {
@@ -417,7 +417,7 @@ func (s *Scorer) UpdateWeights(config ScorerConfig) {
 
 	// Normalize weights
 	total := config.LocalityWeight + config.ReliabilityWeight +
-			config.CostWeight + config.UtilizationWeight + config.NetworkPenaltyWeight
+		config.CostWeight + config.UtilizationWeight + config.NetworkPenaltyWeight
 
 	if total > 0 {
 		config.LocalityWeight /= total

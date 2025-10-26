@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/containerd/cgroups/v3"
 	v1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	v2 "github.com/containerd/cgroups/v3/cgroup2/stats"
-	"github.com/containerd/cgroups/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"

@@ -62,8 +62,8 @@ func BenchmarkMetricsRecording(b *testing.B) {
 // BenchmarkMetricsWithMultipleLabels benchmarks metrics with varying label cardinality
 func BenchmarkMetricsWithMultipleLabels(b *testing.B) {
 	tests := []struct {
-		name        string
-		labelCount  int
+		name       string
+		labelCount int
 	}{
 		{"1_label", 1},
 		{"2_labels", 2},
@@ -120,8 +120,8 @@ func BenchmarkTracingOverhead(b *testing.B) {
 	tracer := provider.Tracer("benchmark")
 
 	tests := []struct {
-		name       string
-		spanDepth  int
+		name      string
+		spanDepth int
 	}{
 		{"single_span", 1},
 		{"nested_3_spans", 3},

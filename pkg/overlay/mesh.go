@@ -16,9 +16,9 @@ type MeshManager struct {
 	peerManager *PeerManager
 	logger      *zap.Logger
 
-	routes      sync.Map // destination -> Route
-	topology    sync.Map // peerID -> []string (connected peers)
-	routeCache  sync.Map // destination -> []Route (all known routes)
+	routes     sync.Map // destination -> Route
+	topology   sync.Map // peerID -> []string (connected peers)
+	routeCache sync.Map // destination -> []Route (all known routes)
 
 	ctx    context.Context
 	cancel context.CancelFunc

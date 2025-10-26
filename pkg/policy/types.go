@@ -117,14 +117,14 @@ type Condition struct {
 type ConditionOperator string
 
 const (
-	OperatorEqual          ConditionOperator = "Equal"
-	OperatorNotEqual       ConditionOperator = "NotEqual"
-	OperatorIn             ConditionOperator = "In"
-	OperatorNotIn          ConditionOperator = "NotIn"
-	OperatorExists         ConditionOperator = "Exists"
-	OperatorDoesNotExist   ConditionOperator = "DoesNotExist"
-	OperatorMatches        ConditionOperator = "Matches"        // Regex match
-	OperatorDoesNotMatch   ConditionOperator = "DoesNotMatch"   // Regex not match
+	OperatorEqual        ConditionOperator = "Equal"
+	OperatorNotEqual     ConditionOperator = "NotEqual"
+	OperatorIn           ConditionOperator = "In"
+	OperatorNotIn        ConditionOperator = "NotIn"
+	OperatorExists       ConditionOperator = "Exists"
+	OperatorDoesNotExist ConditionOperator = "DoesNotExist"
+	OperatorMatches      ConditionOperator = "Matches"      // Regex match
+	OperatorDoesNotMatch ConditionOperator = "DoesNotMatch" // Regex not match
 )
 
 // WorkloadSpec represents the workload specification to evaluate
@@ -139,15 +139,15 @@ type WorkloadSpec struct {
 	Annotations map[string]string
 
 	// Security context
-	Privileged      bool
-	Capabilities    []string
-	HostNetwork     bool
-	HostPID         bool
-	HostIPC         bool
-	RunAsUser       *int64
-	RunAsGroup      *int64
-	FSGroup         *int64
-	ReadOnlyRootFS  bool
+	Privileged     bool
+	Capabilities   []string
+	HostNetwork    bool
+	HostPID        bool
+	HostIPC        bool
+	RunAsUser      *int64
+	RunAsGroup     *int64
+	FSGroup        *int64
+	ReadOnlyRootFS bool
 
 	// Resources
 	CPURequest    int64
@@ -159,8 +159,8 @@ type WorkloadSpec struct {
 	Volumes []VolumeSpec
 
 	// Network
-	Ports           []PortSpec
-	EgressDomains   []string
+	Ports         []PortSpec
+	EgressDomains []string
 
 	// Placement
 	NodeSelector map[string]string
@@ -179,18 +179,18 @@ type VolumeSpec struct {
 
 // PortSpec represents a port specification
 type PortSpec struct {
-	Name          string
-	Port          int32
-	Protocol      string // "TCP", "UDP"
-	HostPort      int32
+	Name     string
+	Port     int32
+	Protocol string // "TCP", "UDP"
+	HostPort int32
 }
 
 // PolicyContext provides context for policy evaluation
 type PolicyContext struct {
 	// Request metadata
-	RequestID   string
-	User        string
-	Groups      []string
+	RequestID      string
+	User           string
+	Groups         []string
 	ServiceAccount string
 
 	// Cluster context
@@ -224,12 +224,12 @@ type EvaluationResult struct {
 
 // Violation represents a policy violation
 type Violation struct {
-	PolicyName  string `json:"policy_name"`
-	RuleName    string `json:"rule_name"`
-	Message     string `json:"message"`
-	Severity    string `json:"severity"` // "Critical", "High", "Medium", "Low"
-	Field       string `json:"field,omitempty"`
-	Value       string `json:"value,omitempty"`
+	PolicyName string `json:"policy_name"`
+	RuleName   string `json:"rule_name"`
+	Message    string `json:"message"`
+	Severity   string `json:"severity"` // "Critical", "High", "Medium", "Low"
+	Field      string `json:"field,omitempty"`
+	Value      string `json:"value,omitempty"`
 }
 
 // AuditEntry represents an audit log entry

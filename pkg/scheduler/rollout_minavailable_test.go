@@ -12,15 +12,15 @@ import (
 // Test ID: CLD-REQ-023-TC-001
 func TestRollout_MinAvailable_Enforcement(t *testing.T) {
 	tests := []struct {
-		name             string
-		currentReplicas  int
-		desiredReplicas  int
-		minAvailable     int
-		maxUnavailable   int
-		expectedBatches  int
-		expectedMaxStop  int
-		shouldSucceed    bool
-		description      string
+		name            string
+		currentReplicas int
+		desiredReplicas int
+		minAvailable    int
+		maxUnavailable  int
+		expectedBatches int
+		expectedMaxStop int
+		shouldSucceed   bool
+		description     string
 	}{
 		{
 			name:            "enforce_min_available_3_of_5",
@@ -591,44 +591,44 @@ func TestRollout_MinAvailable_BlueGreenStrategy(t *testing.T) {
 // Test ID: CLD-REQ-023-TC-006
 func TestRollout_MinAvailable_DefaultCalculation(t *testing.T) {
 	tests := []struct {
-		name                 string
-		desiredReplicas      int
-		maxUnavailable       int
+		name                  string
+		desiredReplicas       int
+		maxUnavailable        int
 		specifiedMinAvailable int
-		expectedMinAvailable int
-		description          string
+		expectedMinAvailable  int
+		description           string
 	}{
 		{
-			name:                 "default_from_max_unavailable",
-			desiredReplicas:      5,
-			maxUnavailable:       2,
+			name:                  "default_from_max_unavailable",
+			desiredReplicas:       5,
+			maxUnavailable:        2,
 			specifiedMinAvailable: 0,
-			expectedMinAvailable: 3, // 5 - 2 = 3
-			description:          "MinAvailable defaults to desiredReplicas - maxUnavailable",
+			expectedMinAvailable:  3, // 5 - 2 = 3
+			description:           "MinAvailable defaults to desiredReplicas - maxUnavailable",
 		},
 		{
-			name:                 "default_when_both_zero",
-			desiredReplicas:      5,
-			maxUnavailable:       0,
+			name:                  "default_when_both_zero",
+			desiredReplicas:       5,
+			maxUnavailable:        0,
 			specifiedMinAvailable: 0,
-			expectedMinAvailable: 4, // max(1, 5-1) = 4
-			description:          "MinAvailable defaults to replicas-1 when both are 0",
+			expectedMinAvailable:  4, // max(1, 5-1) = 4
+			description:           "MinAvailable defaults to replicas-1 when both are 0",
 		},
 		{
-			name:                 "explicit_min_available_used",
-			desiredReplicas:      5,
-			maxUnavailable:       2,
+			name:                  "explicit_min_available_used",
+			desiredReplicas:       5,
+			maxUnavailable:        2,
 			specifiedMinAvailable: 4,
-			expectedMinAvailable: 4,
-			description:          "Explicit minAvailable is used when specified",
+			expectedMinAvailable:  4,
+			description:           "Explicit minAvailable is used when specified",
 		},
 		{
-			name:                 "min_available_clamped_to_replicas",
-			desiredReplicas:      3,
-			maxUnavailable:       1,
+			name:                  "min_available_clamped_to_replicas",
+			desiredReplicas:       3,
+			maxUnavailable:        1,
 			specifiedMinAvailable: 10,
-			expectedMinAvailable: 3, // Clamped to desiredReplicas
-			description:          "MinAvailable is clamped to desiredReplicas when exceeding",
+			expectedMinAvailable:  3, // Clamped to desiredReplicas
+			description:           "MinAvailable is clamped to desiredReplicas when exceeding",
 		},
 	}
 

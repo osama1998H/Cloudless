@@ -7,7 +7,7 @@ import (
 // DefaultPolicies returns a set of recommended default policies
 func DefaultPolicies() []*Policy {
 	return []*Policy{
-		AllowDefaultNamespacePolicy(),        // Allow policy (must come first)
+		AllowDefaultNamespacePolicy(), // Allow policy (must come first)
 		RestrictPrivilegedContainersPolicy(),
 		RestrictHostNamespacesPolicy(),
 		AllowedRegistriesPolicy(),
@@ -160,10 +160,10 @@ func RequireResourceLimitsPolicy() *Policy {
 				Description: "Containers must define resource limits",
 				Type:        RuleTypeResourceLimit,
 				Config: map[string]interface{}{
-					"require_limits":            true,
-					"max_cpu_millicores":        float64(16000),  // 16 cores max
-					"max_memory_bytes":          float64(32 * 1024 * 1024 * 1024), // 32GB max
-					"max_limit_to_request_ratio": float64(4.0),   // Limit can't be more than 4x request
+					"require_limits":             true,
+					"max_cpu_millicores":         float64(16000),                   // 16 cores max
+					"max_memory_bytes":           float64(32 * 1024 * 1024 * 1024), // 32GB max
+					"max_limit_to_request_ratio": float64(4.0),                     // Limit can't be more than 4x request
 				},
 			},
 		},
@@ -202,10 +202,10 @@ func ProductionNamespacePolicy() *Policy {
 				Description: "Production workloads must have conservative resource limits",
 				Type:        RuleTypeResourceLimit,
 				Config: map[string]interface{}{
-					"require_limits":            true,
-					"max_cpu_millicores":        float64(8000),   // 8 cores max in prod
-					"max_memory_bytes":          float64(16 * 1024 * 1024 * 1024), // 16GB max in prod
-					"max_limit_to_request_ratio": float64(2.0),   // Tighter ratio for prod
+					"require_limits":             true,
+					"max_cpu_millicores":         float64(8000),                    // 8 cores max in prod
+					"max_memory_bytes":           float64(16 * 1024 * 1024 * 1024), // 16GB max in prod
+					"max_limit_to_request_ratio": float64(2.0),                     // Tighter ratio for prod
 				},
 			},
 		},
@@ -298,7 +298,7 @@ func RestrictEgressPolicy() *Policy {
 						"192.168.0.0/16", // Private network
 					},
 					"denied_destinations": []interface{}{
-						"*.onion",        // Tor sites
+						"*.onion", // Tor sites
 						"*.suspicious.com",
 					},
 					"allow_private_ips": true,

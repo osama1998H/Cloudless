@@ -425,13 +425,13 @@ func (rm *ReplicationManager) getReplicaKey(chunkID, nodeID string) string {
 
 // ReplicationStats contains replication statistics
 type ReplicationStats struct {
-	TotalChunks            int64
-	TotalReplicas          int64
-	HealthyReplicas        int64
-	StaleReplicas          int64
-	CorruptedReplicas      int64
-	MissingReplicas        int64
-	UnderReplicatedChunks  int64
-	OverReplicatedChunks   int64
-	LastUpdated            time.Time
+	TotalChunks           int64
+	TotalReplicas         int64
+	HealthyReplicas       int64
+	StaleReplicas         int64
+	CorruptedReplicas     int64
+	MissingReplicas       int64
+	UnderReplicatedChunks int64
+	OverReplicatedChunks  int64
+	LastUpdated           time.Time
 }

@@ -24,34 +24,34 @@ type Scheduler struct {
 // SchedulerConfig contains scheduler configuration
 type SchedulerConfig struct {
 	// Scoring weights
-	LocalityWeight        float64
-	ReliabilityWeight     float64
-	CostWeight            float64
-	UtilizationWeight     float64
-	NetworkPenaltyWeight  float64
+	LocalityWeight       float64
+	ReliabilityWeight    float64
+	CostWeight           float64
+	UtilizationWeight    float64
+	NetworkPenaltyWeight float64
 
 	// Scheduling policies
-	MaxRetries         int
-	RetryBackoff       time.Duration
-	SpreadPolicy       string // "zone", "region", "node"
-	PackingStrategy    string // "binpack", "spread", "random"
-	PreferredLocality  string // preferred region/zone
-	EnforcePlacement   bool   // strictly enforce placement constraints
+	MaxRetries        int
+	RetryBackoff      time.Duration
+	SpreadPolicy      string // "zone", "region", "node"
+	PackingStrategy   string // "binpack", "spread", "random"
+	PreferredLocality string // preferred region/zone
+	EnforcePlacement  bool   // strictly enforce placement constraints
 }
 
 // WorkloadSpec defines workload requirements
 type WorkloadSpec struct {
-	ID                string
-	Name              string
-	Namespace         string
-	Replicas          int
-	Resources         ResourceRequirements
-	PlacementPolicy   PlacementPolicy
-	RestartPolicy     RestartPolicy
-	RolloutStrategy   RolloutStrategy
-	Priority          int
-	Labels            map[string]string
-	Annotations       map[string]string
+	ID              string
+	Name            string
+	Namespace       string
+	Replicas        int
+	Resources       ResourceRequirements
+	PlacementPolicy PlacementPolicy
+	RestartPolicy   RestartPolicy
+	RolloutStrategy RolloutStrategy
+	Priority        int
+	Labels          map[string]string
+	Annotations     map[string]string
 }
 
 // ResourceRequirements defines resource needs
@@ -71,12 +71,12 @@ type ResourceSpec struct {
 
 // PlacementPolicy controls where workloads run
 type PlacementPolicy struct {
-	Regions       []string
-	Zones         []string
-	NodeSelector  map[string]string
-	Affinity      []AffinityRule
-	AntiAffinity  []AffinityRule
-	Tolerations   []Toleration
+	Regions        []string
+	Zones          []string
+	NodeSelector   map[string]string
+	Affinity       []AffinityRule
+	AntiAffinity   []AffinityRule
+	Tolerations    []Toleration
 	SpreadTopology string
 }
 
@@ -106,55 +106,55 @@ type RestartPolicy struct {
 
 // RolloutStrategy controls updates
 type RolloutStrategy struct {
-	Strategy        string // "RollingUpdate", "Recreate", "BlueGreen"
-	MaxSurge        int
-	MaxUnavailable  int
-	MinAvailable    int    // Minimum replicas that must remain available during updates
-	PauseDuration   time.Duration
+	Strategy       string // "RollingUpdate", "Recreate", "BlueGreen"
+	MaxSurge       int
+	MaxUnavailable int
+	MinAvailable   int // Minimum replicas that must remain available during updates
+	PauseDuration  time.Duration
 }
 
 // ScheduleDecision represents a placement decision
 type ScheduleDecision struct {
-	ReplicaID   string
-	NodeID      string
-	NodeName    string
-	FragmentID  string
-	Score       float64
-	Reasons     []string
+	ReplicaID  string
+	NodeID     string
+	NodeName   string
+	FragmentID string
+	Score      float64
+	Reasons    []string
 }
 
 // ScheduleResult contains scheduling results
 type ScheduleResult struct {
-	Decisions   []ScheduleDecision
-	Success     bool
-	Message     string
+	Decisions           []ScheduleDecision
+	Success             bool
+	Message             string
 	UnscheduledReplicas int
 }
 
 // Fragment represents a resource allocation unit
 type Fragment struct {
-	ID        string
-	NodeID    string
-	Resources ResourceSpec
-	State     string // "available", "reserved", "allocated", "releasing"
+	ID         string
+	NodeID     string
+	Resources  ResourceSpec
+	State      string // "available", "reserved", "allocated", "releasing"
 	WorkloadID string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // DefaultSchedulerConfig returns default scheduler configuration
 func DefaultSchedulerConfig() *SchedulerConfig {
 	return &SchedulerConfig{
-		LocalityWeight:    0.25,
-		ReliabilityWeight: 0.30,
-		CostWeight:        0.15,
-		UtilizationWeight: 0.20,
-		NetworkPenaltyWeight:     0.10,
-		MaxRetries:        3,
-		RetryBackoff:      time.Second,
-		SpreadPolicy:      "zone",
-		PackingStrategy:   "binpack",
-		EnforcePlacement:  false,
+		LocalityWeight:       0.25,
+		ReliabilityWeight:    0.30,
+		CostWeight:           0.15,
+		UtilizationWeight:    0.20,
+		NetworkPenaltyWeight: 0.10,
+		MaxRetries:           3,
+		RetryBackoff:         time.Second,
+		SpreadPolicy:         "zone",
+		PackingStrategy:      "binpack",
+		EnforcePlacement:     false,
 	}
 }
 
@@ -178,11 +178,11 @@ func NewScheduler(membershipManager *membership.Manager, config *SchedulerConfig
 
 	// Initialize scorer
 	s.scorer = NewScorer(ScorerConfig{
-		LocalityWeight:    config.LocalityWeight,
-		ReliabilityWeight: config.ReliabilityWeight,
-		CostWeight:        config.CostWeight,
-		UtilizationWeight: config.UtilizationWeight,
-		NetworkPenaltyWeight:     config.NetworkPenaltyWeight,
+		LocalityWeight:       config.LocalityWeight,
+		ReliabilityWeight:    config.ReliabilityWeight,
+		CostWeight:           config.CostWeight,
+		UtilizationWeight:    config.UtilizationWeight,
+		NetworkPenaltyWeight: config.NetworkPenaltyWeight,
 	}, logger)
 
 	// Initialize bin packer
@@ -676,8 +676,8 @@ func (s *Scheduler) Reschedule(ctx context.Context, workload *WorkloadSpec, fail
 	if !hasCapacity {
 		// CLD-REQ-030: Capacity exists but not sufficient for workload requirements
 		return &ScheduleResult{
-			Success:             false,
-			Message:             fmt.Sprintf("Insufficient capacity in VRN for workload requirements (CPU: %d mCores, Mem: %d bytes)",
+			Success: false,
+			Message: fmt.Sprintf("Insufficient capacity in VRN for workload requirements (CPU: %d mCores, Mem: %d bytes)",
 				workload.Resources.Requests.CPUMillicores, workload.Resources.Requests.MemoryBytes),
 			UnscheduledReplicas: workload.Replicas,
 		}, nil
@@ -929,11 +929,11 @@ func (s *Scheduler) UpdateSchedulerConfig(config *SchedulerConfig) {
 
 	// Update scorer weights
 	s.scorer.UpdateWeights(ScorerConfig{
-		LocalityWeight:    config.LocalityWeight,
-		ReliabilityWeight: config.ReliabilityWeight,
-		CostWeight:        config.CostWeight,
-		UtilizationWeight: config.UtilizationWeight,
-		NetworkPenaltyWeight:     config.NetworkPenaltyWeight,
+		LocalityWeight:       config.LocalityWeight,
+		ReliabilityWeight:    config.ReliabilityWeight,
+		CostWeight:           config.CostWeight,
+		UtilizationWeight:    config.UtilizationWeight,
+		NetworkPenaltyWeight: config.NetworkPenaltyWeight,
 	})
 
 	s.logger.Info("Updated scheduler configuration",

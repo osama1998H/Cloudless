@@ -32,8 +32,8 @@ func NewStorageAgent(config *Config) (*StorageAgent, error) {
 	// Create storage config
 	storageConfig := storage.StorageConfig{
 		DataDir:           filepath.Join(config.DataDir, "storage"),
-		ReplicationFactor: 3, // Default to R=3
-		ChunkSize:         4 * 1024 * 1024, // 4MB chunks
+		ReplicationFactor: 3,                     // Default to R=3
+		ChunkSize:         4 * 1024 * 1024,       // 4MB chunks
 		RepairInterval:    1 * 3600 * 1000000000, // 1 hour in nanoseconds
 		EnableCompression: false,
 		EnableReadRepair:  true,

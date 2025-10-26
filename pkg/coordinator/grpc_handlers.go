@@ -68,6 +68,32 @@ func (c *Coordinator) Heartbeat(ctx context.Context, req *api.HeartbeatRequest) 
 		return nil, err
 	}
 
+	// CLD-REQ-032: Process container health data
+	if len(req.ContainerHealth) > 0 {
+		c.logger.Debug("Processing container health data",
+			zap.String("node_id", req.NodeId),
+			zap.Int("container_count", len(req.ContainerHealth)),
+		)
+
+		for _, health := range req.ContainerHealth {
+			// Update replica health in state manager
+			if err := c.workloadStateMgr.UpdateReplicaHealth(
+				ctx,
+				health.ContainerId,
+				health.LivenessHealthy,
+				health.ReadinessHealthy,
+				health.LivenessConsecutiveFailures,
+				health.ReadinessConsecutiveFailures,
+			); err != nil {
+				c.logger.Warn("Failed to update replica health",
+					zap.String("container_id", health.ContainerId),
+					zap.Error(err),
+				)
+				// Continue processing other containers
+			}
+		}
+	}
+
 	return resp, nil
 }
 
@@ -317,9 +343,9 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 	var placement scheduler.PlacementPolicy
 	if spec.Placement != nil {
 		placement = scheduler.PlacementPolicy{
-			Regions:       spec.Placement.Regions,
-			Zones:         spec.Placement.Zones,
-			NodeSelector:  spec.Placement.NodeSelector,
+			Regions:      spec.Placement.Regions,
+			Zones:        spec.Placement.Zones,
+			NodeSelector: spec.Placement.NodeSelector,
 		}
 	}
 
@@ -858,11 +884,11 @@ func (c *Coordinator) ScaleWorkload(ctx context.Context, req *api.ScaleWorkloadR
 					Name:      workloadState.Name,
 					Namespace: workloadState.Namespace,
 					Spec: &api.WorkloadSpec{
-						Image:     workloadState.Image,
-						Command:   workloadState.Command,
-						Args:      workloadState.Args,
-						Env:       workloadState.Env,
-						Replicas:  desiredReplicas,
+						Image:    workloadState.Image,
+						Command:  workloadState.Command,
+						Args:     workloadState.Args,
+						Env:      workloadState.Env,
+						Replicas: desiredReplicas,
 					},
 				},
 				Action: "run",
@@ -943,10 +969,10 @@ func (c *Coordinator) Schedule(ctx context.Context, req *api.ScheduleRequest) (*
 
 	// Convert API request to scheduler spec
 	spec := scheduler.WorkloadSpec{
-		ID:       workload.Id,
-		Name:     workload.Name,
+		ID:        workload.Id,
+		Name:      workload.Name,
 		Namespace: workload.Namespace,
-		Replicas: int(workload.Spec.Replicas),
+		Replicas:  int(workload.Spec.Replicas),
 		Resources: scheduler.ResourceRequirements{
 			Requests: scheduler.ResourceSpec{
 				CPUMillicores: workload.Spec.Resources.Requests.CpuMillicores,

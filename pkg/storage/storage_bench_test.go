@@ -187,10 +187,10 @@ func BenchmarkChunkCompression(b *testing.B) {
 	}
 
 	tests := []struct {
-		name           string
-		dataType       string
-		dataGenerator  func(int) []byte
-		chunkSize      int
+		name          string
+		dataType      string
+		dataGenerator func(int) []byte
+		chunkSize     int
 	}{
 		{"text_highly_compressible_1MB", "text", generateRepeatableData, 1024 * 1024},
 		{"random_not_compressible_1MB", "random", generateRandomData, 1024 * 1024},

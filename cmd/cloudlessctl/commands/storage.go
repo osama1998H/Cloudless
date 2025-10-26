@@ -8,10 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudless/cloudless/pkg/api"
 	cmdconfig "github.com/cloudless/cloudless/cmd/cloudlessctl/config"
+	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/spf13/cobra"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // NewStorageCommand creates the storage command
@@ -73,7 +72,7 @@ func newStorageBucketCommand() *cobra.Command {
 }
 
 // newStorageObjectCommand creates the object command
-func newStorageObjectCommand() *cobra.Command{
+func newStorageObjectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "object",
 		Short: "Manage storage objects",
@@ -147,6 +146,7 @@ func newStorageVolumeCommand() *cobra.Command {
 
 	return cmd
 }
+
 // Bucket command implementations
 
 func runBucketList(cmd *cobra.Command, args []string) error {
@@ -176,13 +176,17 @@ func runBucketList(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		headers := []string{"NAME", "REGION", "STORAGE CLASS", "CREATED"}
+		headers := []string{"NAME", "NAMESPACE", "STORAGE CLASS", "CREATED"}
 		var rows [][]string
 		for _, bucket := range resp.Buckets {
+			storageClass := ""
+			if bucket.Spec != nil {
+				storageClass = bucket.Spec.StorageClass
+			}
 			rows = append(rows, []string{
 				bucket.Name,
-				bucket.Region,
-				bucket.StorageClass,
+				bucket.Namespace,
+				storageClass,
 				bucket.CreatedAt.AsTime().Format("2006-01-02 15:04:05"),
 			})
 		}
@@ -206,14 +210,21 @@ func runBucketCreate(cmd *cobra.Command, args []string) error {
 	}
 	defer conn.Close()
 
-	region, _ := cmd.Flags().GetString("region")
 	storageClass, _ := cmd.Flags().GetString("storage-class")
+	namespace, _ := cmd.Flags().GetString("namespace")
+	if namespace == "" {
+		namespace = "default"
+	}
 
 	ctx := context.Background()
 	bucket, err := client.CreateBucket(ctx, &api.CreateBucketRequest{
-		Name:         args[0],
-		Region:       region,
-		StorageClass: storageClass,
+		Bucket: &api.Bucket{
+			Name:      args[0],
+			Namespace: namespace,
+			Spec: &api.BucketSpec{
+				StorageClass: storageClass,
+			},
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create bucket: %w", err)
@@ -300,7 +311,7 @@ func runObjectList(cmd *cobra.Command, args []string) error {
 			rows = append(rows, []string{
 				obj.Key,
 				fmt.Sprintf("%d", obj.Size),
-				obj.LastModified.AsTime().Format("2006-01-02 15:04:05"),
+				obj.ModifiedAt.AsTime().Format("2006-01-02 15:04:05"),
 			})
 		}
 		outputter.PrintTable(headers, rows)
@@ -361,8 +372,11 @@ func runObjectGet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to receive chunk: %w", err)
 		}
 
-		if _, err := outFile.Write(chunk.Data); err != nil {
-			return fmt.Errorf("failed to write data: %w", err)
+		// Extract chunk data from oneof field
+		if chunkData := chunk.GetChunk(); chunkData != nil {
+			if _, err := outFile.Write(chunkData); err != nil {
+				return fmt.Errorf("failed to write data: %w", err)
+			}
 		}
 	}
 
@@ -484,15 +498,18 @@ func runVolumeList(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		headers := []string{"NAME", "SIZE", "TYPE", "STATE", "CREATED"}
+		headers := []string{"NAME", "SOURCE", "MOUNT PATH", "READ ONLY"}
 		var rows [][]string
 		for _, vol := range resp.Volumes {
+			readOnly := "false"
+			if vol.ReadOnly {
+				readOnly = "true"
+			}
 			rows = append(rows, []string{
 				vol.Name,
-				fmt.Sprintf("%d GB", vol.Size/(1024*1024*1024)),
-				vol.VolumeType,
-				vol.State.String(),
-				vol.CreatedAt.AsTime().Format("2006-01-02 15:04:05"),
+				vol.Source,
+				vol.MountPath,
+				readOnly,
 			})
 		}
 		outputter.PrintTable(headers, rows)
@@ -504,30 +521,8 @@ func runVolumeList(cmd *cobra.Command, args []string) error {
 }
 
 func runVolumeCreate(cmd *cobra.Command, args []string) error {
-	cfg, err := cmdconfig.LoadConfig(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	client, conn, err := cfg.NewStorageClient()
-	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
-	}
-	defer conn.Close()
-
-	size, _ := cmd.Flags().GetInt64("size")
-	volType, _ := cmd.Flags().GetString("type")
-
-	ctx := context.Background()
-	volume, err := client.CreateVolume(ctx, &api.CreateVolumeRequest{
-		Name:       args[0],
-		Size:       size,
-		VolumeType: volType,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create volume: %w", err)
-	}
-
-	fmt.Printf("Volume '%s' created successfully (%d GB)\n", volume.Name, volume.Size/(1024*1024*1024))
-	return nil
+	// TODO: Implement persistent volume creation
+	// The current CreateVolumeRequest API is for container mount volumes,
+	// not persistent volumes. This command needs proper API support.
+	return fmt.Errorf("volume create command not yet implemented - use container volume mounts in workload spec")
 }
