@@ -44,6 +44,23 @@ var (
 		[]string{"reason"}, // node_failure, rebalance, constraint_violation
 	)
 
+	// CLD-REQ-031: Failed replica rescheduling latency metrics
+	RescheduleLatencySeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_scheduler_reschedule_latency_seconds",
+			Help:    "Time from replica failure detection to successful rescheduling (CLD-REQ-031: P50 < 3s, P95 < 10s)",
+			Buckets: []float64{0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0},
+		},
+	)
+
+	RescheduleFailuresTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_scheduler_reschedule_failures_total",
+			Help: "Total number of failed rescheduling attempts",
+		},
+		[]string{"reason"}, // insufficient_capacity, constraint_violation, scheduler_error
+	)
+
 	SchedulingQueueDepth = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "cloudless_scheduling_queue_depth",

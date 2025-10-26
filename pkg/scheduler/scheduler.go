@@ -592,16 +592,173 @@ func (s *Scheduler) generateFragmentID() string {
 	return fmt.Sprintf("fragment-%d-%d", time.Now().Unix(), time.Now().Nanosecond())
 }
 
-// Reschedule handles rescheduling of failed replicas
-func (s *Scheduler) Reschedule(ctx context.Context, workload *WorkloadSpec, failedNodes []string) (*ScheduleResult, error) {
+// Reschedule handles rescheduling of failed replicas while respecting minAvailable constraints.
+// Implements CLD-REQ-030: Device failure must not reduce service below declared minAvailable
+// when capacity exists in the VRN.
+//
+// Parameters:
+//   - workload: The workload specification with RolloutStrategy containing MinAvailable
+//   - failedNodes: List of node IDs that have failed
+//   - currentReadyReplicas: Number of replicas currently in ready state
+//
+// Returns:
+//   - ScheduleResult with new placement decisions, or error if constraints cannot be met
+func (s *Scheduler) Reschedule(ctx context.Context, workload *WorkloadSpec, failedNodes []string, currentReadyReplicas int) (*ScheduleResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.logger.Info("Rescheduling workload",
 		zap.String("workload_id", workload.ID),
 		zap.Int("failed_nodes", len(failedNodes)),
+		zap.Int("current_ready_replicas", currentReadyReplicas),
+		zap.Int("min_available", workload.RolloutStrategy.MinAvailable),
 	)
 
-	// Mark failed nodes as unavailable temporarily
-	// Then call Schedule with updated constraints
-	return s.Schedule(ctx, workload)
+	// CLD-REQ-030: Validate minAvailable constraint
+	minAvailable := workload.RolloutStrategy.MinAvailable
+	if minAvailable > 0 {
+		// Calculate how many replicas will remain running after excluding failed nodes
+		// This is a conservative estimate - actual count may be higher if replicas
+		// were already migrating or if not all replicas were on failed nodes
+		if currentReadyReplicas < minAvailable {
+			return nil, fmt.Errorf("cannot reschedule: current ready replicas (%d) below minAvailable (%d) - wait for capacity or reduce minAvailable",
+				currentReadyReplicas, minAvailable)
+		}
+
+		s.logger.Info("MinAvailable constraint validated",
+			zap.Int("current_ready", currentReadyReplicas),
+			zap.Int("min_available", minAvailable),
+		)
+	}
+
+	// Get available nodes
+	nodes, err := s.membershipManager.ListNodes(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	// Filter out failed nodes from consideration
+	healthyNodes := s.filterFailedNodes(nodes, failedNodes)
+	if len(healthyNodes) == 0 {
+		return &ScheduleResult{
+			Success:             false,
+			Message:             "No healthy nodes available after excluding failed nodes",
+			UnscheduledReplicas: workload.Replicas,
+		}, nil
+	}
+
+	s.logger.Info("Filtered healthy nodes",
+		zap.Int("total_nodes", len(nodes)),
+		zap.Int("healthy_nodes", len(healthyNodes)),
+		zap.Int("failed_nodes", len(failedNodes)),
+	)
+
+	// Filter nodes based on workload requirements
+	candidateNodes := s.filterNodes(healthyNodes, workload)
+	if len(candidateNodes) == 0 {
+		// CLD-REQ-030: No capacity exists in VRN
+		return &ScheduleResult{
+			Success:             false,
+			Message:             "No nodes match requirements - insufficient capacity in VRN",
+			UnscheduledReplicas: workload.Replicas,
+		}, nil
+	}
+
+	// Verify at least one node has capacity
+	hasCapacity := false
+	for _, node := range candidateNodes {
+		if s.hasEnoughResources(node, workload.Resources.Requests) {
+			hasCapacity = true
+			break
+		}
+	}
+
+	if !hasCapacity {
+		// CLD-REQ-030: Capacity exists but not sufficient for workload requirements
+		return &ScheduleResult{
+			Success:             false,
+			Message:             fmt.Sprintf("Insufficient capacity in VRN for workload requirements (CPU: %d mCores, Mem: %d bytes)",
+				workload.Resources.Requests.CPUMillicores, workload.Resources.Requests.MemoryBytes),
+			UnscheduledReplicas: workload.Replicas,
+		}, nil
+	}
+
+	// Score and rank candidate nodes
+	scoredNodes := s.scoreNodes(candidateNodes, workload)
+
+	// Sort nodes by score
+	sort.Slice(scoredNodes, func(i, j int) bool {
+		return scoredNodes[i].Score > scoredNodes[j].Score
+	})
+
+	// Make placement decisions using configured packing strategy
+	var decisions []ScheduleDecision
+	switch s.config.PackingStrategy {
+	case "binpack":
+		decisions = s.binPackSchedule(scoredNodes, workload)
+	case "spread":
+		decisions = s.spreadSchedule(scoredNodes, workload)
+	default:
+		decisions = s.defaultSchedule(scoredNodes, workload)
+	}
+
+	scheduled := len(decisions)
+
+	result := &ScheduleResult{
+		Decisions:           decisions,
+		Success:             scheduled == workload.Replicas,
+		UnscheduledReplicas: workload.Replicas - scheduled,
+	}
+
+	if result.Success {
+		result.Message = fmt.Sprintf("Successfully rescheduled %d replicas on healthy nodes", scheduled)
+		s.logger.Info("Workload rescheduled successfully",
+			zap.String("workload_id", workload.ID),
+			zap.Int("scheduled", scheduled),
+		)
+	} else {
+		result.Message = fmt.Sprintf("Partially rescheduled %d of %d replicas - insufficient capacity", scheduled, workload.Replicas)
+		s.logger.Warn("Partial rescheduling",
+			zap.String("workload_id", workload.ID),
+			zap.Int("scheduled", scheduled),
+			zap.Int("desired", workload.Replicas),
+		)
+	}
+
+	return result, nil
+}
+
+// filterFailedNodes removes failed nodes from the node list
+func (s *Scheduler) filterFailedNodes(nodes []*membership.NodeInfo, failedNodeIDs []string) []*membership.NodeInfo {
+	// Create a set of failed node IDs for O(1) lookup
+	failedSet := make(map[string]bool, len(failedNodeIDs))
+	for _, nodeID := range failedNodeIDs {
+		failedSet[nodeID] = true
+	}
+
+	filtered := make([]*membership.NodeInfo, 0, len(nodes))
+	for _, node := range nodes {
+		// Skip failed nodes and nodes not in ready state
+		if failedSet[node.ID] {
+			s.logger.Debug("Node filtered: in failed nodes list",
+				zap.String("node_id", node.ID),
+			)
+			continue
+		}
+
+		// Also filter out nodes in failed or offline states (belt and suspenders)
+		if node.State == membership.StateFailed || node.State == membership.StateOffline {
+			s.logger.Debug("Node filtered: failed or offline state",
+				zap.String("node_id", node.ID),
+				zap.String("state", node.State),
+			)
+			continue
+		}
+
+		filtered = append(filtered, node)
+	}
+
+	return filtered
 }
 
 // PreemptWorkloads handles preemption for higher priority workloads

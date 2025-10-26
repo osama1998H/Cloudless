@@ -991,6 +991,7 @@ func (c *Coordinator) Schedule(ctx context.Context, req *api.ScheduleRequest) (*
 }
 
 // Reschedule performs rescheduling for a workload
+// Implements CLD-REQ-030: Validates minAvailable constraint before rescheduling
 func (c *Coordinator) Reschedule(ctx context.Context, req *api.RescheduleRequest) (*api.RescheduleResponse, error) {
 	if !c.IsLeader() {
 		return nil, fmt.Errorf("not the leader, redirect to: %s", c.GetLeader())
@@ -1007,7 +1008,44 @@ func (c *Coordinator) Reschedule(ctx context.Context, req *api.RescheduleRequest
 		return nil, fmt.Errorf("failed to get workload: %w", err)
 	}
 
-	// Build scheduler spec
+	// Extract failed nodes from workload state
+	// Collect node IDs that have failed replicas or are themselves failed
+	failedNodesMap := make(map[string]bool)
+	for _, replica := range workloadState.Replicas {
+		if replica.Status == ReplicaStatusFailed {
+			failedNodesMap[replica.NodeID] = true
+		}
+	}
+	failedNodes := make([]string, 0, len(failedNodesMap))
+	for nodeID := range failedNodesMap {
+		failedNodes = append(failedNodes, nodeID)
+	}
+
+	c.logger.Info("Identified failed nodes for rescheduling",
+		zap.Int("failed_nodes", len(failedNodes)),
+		zap.Strings("node_ids", failedNodes),
+	)
+
+	// CLD-REQ-030: Check minAvailable constraint before rescheduling
+	minAvailable := workloadState.Rollout.MinAvailable
+	if minAvailable > 0 {
+		if workloadState.ReadyReplicas < int32(minAvailable) {
+			c.logger.Error("Cannot reschedule: minAvailable constraint violated",
+				zap.String("workload_id", req.WorkloadId),
+				zap.Int32("ready_replicas", workloadState.ReadyReplicas),
+				zap.Int("min_available", minAvailable),
+			)
+			return nil, fmt.Errorf("cannot reschedule: current ready replicas (%d) below minAvailable (%d) - device failure would violate availability constraint",
+				workloadState.ReadyReplicas, minAvailable)
+		}
+
+		c.logger.Info("MinAvailable constraint validated for rescheduling",
+			zap.Int32("ready_replicas", workloadState.ReadyReplicas),
+			zap.Int("min_available", minAvailable),
+		)
+	}
+
+	// Build scheduler spec with RolloutStrategy
 	schedulerSpec := scheduler.WorkloadSpec{
 		ID:              workloadState.ID,
 		Name:            workloadState.Name,
@@ -1015,10 +1053,15 @@ func (c *Coordinator) Reschedule(ctx context.Context, req *api.RescheduleRequest
 		Replicas:        int(workloadState.DesiredReplicas),
 		Resources:       workloadState.Resources,
 		PlacementPolicy: workloadState.Placement,
+		RolloutStrategy: workloadState.Rollout, // CLD-REQ-030: Include rollout strategy
+		RestartPolicy:   workloadState.Restart,
+		Priority:        int(workloadState.Priority),
+		Labels:          workloadState.Labels,
+		Annotations:     workloadState.Annotations,
 	}
 
-	// Find new placement for replicas
-	decisions, err := c.ScheduleWorkload(ctx, schedulerSpec)
+	// Call scheduler's Reschedule method with failed nodes and current ready replicas
+	result, err := c.scheduler.Reschedule(ctx, &schedulerSpec, failedNodes, int(workloadState.ReadyReplicas))
 	if err != nil {
 		c.logger.Error("Failed to reschedule workload",
 			zap.String("workload_id", req.WorkloadId),
@@ -1026,6 +1069,8 @@ func (c *Coordinator) Reschedule(ctx context.Context, req *api.RescheduleRequest
 		)
 		return nil, fmt.Errorf("failed to reschedule workload: %w", err)
 	}
+
+	decisions := result.Decisions
 
 	// Stop old replicas and start new ones
 	oldDecisions := make([]*api.ScheduleDecision, 0, len(workloadState.Replicas))

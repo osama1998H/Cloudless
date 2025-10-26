@@ -110,6 +110,7 @@ type Coordinator struct {
 	certManager      *mtls.CertificateManager
 	tokenManager     *mtls.TokenManager
 	workloadStateMgr *WorkloadStateManager
+	replicaMonitor   *ReplicaMonitor // CLD-REQ-031: Automatic failed replica rescheduling
 	policyEngine     policy.PolicyEngine
 	eventStream      *observability.EventStream
 
@@ -265,6 +266,18 @@ func New(config *Config) (*Coordinator, error) {
 	}
 	c.workloadStateMgr = workloadStateMgr
 
+	// Initialize Replica Monitor (CLD-REQ-031)
+	// Note: We pass 'c' (coordinator) to ReplicaMonitor, but it's not fully initialized yet.
+	// This is safe because ReplicaMonitor only uses the coordinator reference in its reconcile
+	// loop, which doesn't start until Start() is called.
+	config.Logger.Info("Initializing Replica Monitor")
+	replicaMonitorConfig := DefaultReplicaMonitorConfig(config.Logger)
+	replicaMonitor, err := NewReplicaMonitor(replicaMonitorConfig, workloadStateMgr, c)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize replica monitor: %w", err)
+	}
+	c.replicaMonitor = replicaMonitor
+
 	// Initialize Overlay Networking Components
 	config.Logger.Info("Initializing Overlay Networking")
 
@@ -409,6 +422,14 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start membership manager: %w", err)
 	}
 
+	// Start Replica Monitor (CLD-REQ-031)
+	if c.replicaMonitor != nil {
+		c.logger.Info("Starting replica monitor")
+		if err := c.replicaMonitor.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start replica monitor: %w", err)
+		}
+	}
+
 	// Start Overlay Networking Components
 	c.logger.Info("Starting overlay networking")
 
@@ -465,6 +486,14 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 	if c.transport != nil {
 		if err := c.transport.Close(); err != nil {
 			c.logger.Error("Failed to stop overlay transport", zap.Error(err))
+		}
+	}
+
+	// Stop Replica Monitor (CLD-REQ-031)
+	if c.replicaMonitor != nil {
+		c.logger.Info("Stopping replica monitor")
+		if err := c.replicaMonitor.Stop(); err != nil {
+			c.logger.Error("Failed to stop replica monitor", zap.Error(err))
 		}
 	}
 
