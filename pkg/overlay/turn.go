@@ -65,6 +65,8 @@ func (tc *TURNClient) performTURNAllocation(ctx context.Context, server TURNServ
 	}
 
 	// Create UDP connection
+	// Use port 0 to let OS assign an available port (avoids conflict with QUIC transport)
+	udpAddr.Port = 0
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UDP connection: %w", err)

@@ -335,6 +335,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	if err := a.natTraversal.Start(a.config.OverlayConfig.Transport.ListenAddress); err != nil {
 		a.logger.Warn("Failed to start NAT traversal", zap.Error(err))
 		// Continue even if NAT traversal fails
+	} else {
+		// Connect NAT traversal to peer manager
+		a.peerManager.SetNATTraversal(a.natTraversal)
+		a.logger.Info("NAT traversal connected to peer manager")
 	}
 
 	// Connect to coordinator

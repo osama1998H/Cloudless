@@ -125,9 +125,10 @@ func (sc *STUNClient) discoverWithRFC5780(ctx context.Context, localAddr string)
 // performSTUNDiscovery performs STUN discovery against a specific server
 func (sc *STUNClient) performSTUNDiscovery(ctx context.Context, server, localIP string, localPort int) (*NATInfo, error) {
 	// Create UDP connection
+	// Use port 0 to let OS assign an available port (avoids conflict with QUIC transport)
 	localAddr := &net.UDPAddr{
 		IP:   net.ParseIP(localIP),
-		Port: localPort,
+		Port: 0, // Dynamic port allocation
 	}
 
 	serverAddr, err := net.ResolveUDPAddr("udp", server)
@@ -283,6 +284,10 @@ func (sc *STUNClient) PerformHolePunch(ctx context.Context, localAddr, remotePub
 	}
 
 	// Create UDP connection
+	// Use dynamic port to avoid conflict with QUIC transport
+	// Note: This means hole punching won't use the same port as QUIC,
+	// but avoids "address already in use" errors
+	localUDPAddr.Port = 0
 	conn, err := net.ListenUDP("udp", localUDPAddr)
 	if err != nil {
 		return fmt.Errorf("failed to create UDP connection: %w", err)
