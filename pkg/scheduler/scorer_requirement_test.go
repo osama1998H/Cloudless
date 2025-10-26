@@ -173,7 +173,8 @@ func TestScorer_UpdateWeights_Normalization(t *testing.T) {
 	}
 }
 
-// TestScorer_UpdateWeights_ZeroWeights tests edge case of all zero weights.
+// TestScorer_UpdateWeights_ZeroWeights verifies CLD-REQ-021 weight handling.
+// CLD-REQ-021: Tests edge case where UpdateWeights receives all zero weights.
 func TestScorer_UpdateWeights_ZeroWeights(t *testing.T) {
 	logger := zap.NewNop()
 	scorer := NewScorer(ScorerConfig{}, logger)
@@ -187,8 +188,8 @@ func TestScorer_UpdateWeights_ZeroWeights(t *testing.T) {
 		NetworkPenaltyWeight: 0,
 	})
 
-	// All weights should remain 0 (can't normalize 0 total)
-	// This is edge case behavior - scorer won't work properly but shouldn't crash
+	// UpdateWeights keeps weights at 0 when total is 0 (unlike NewScorer which falls back to defaults)
+	// This is intentional edge case behavior - scorer won't work properly but shouldn't crash
 	total := scorer.config.LocalityWeight +
 		scorer.config.ReliabilityWeight +
 		scorer.config.CostWeight +
@@ -653,7 +654,7 @@ func TestScorer_ReliabilityScore_Clamping(t *testing.T) {
 }
 
 // TestScorer_CostScore_OptimalUtilization verifies CLD-REQ-021 cost component.
-// Tests the 10-30% sweet spot for optimal resource utilization.
+// Tests the optimal <30% range. Note: exactly 30% falls into next category (0.8 score).
 func TestScorer_CostScore_OptimalUtilization(t *testing.T) {
 	logger := zap.NewNop()
 	scorer := NewScorer(ScorerConfig{}, logger)
@@ -1308,8 +1309,8 @@ func TestScorer_NetworkPenalty_NetworkUnavailable(t *testing.T) {
 
 	penalty := scorer.calculateNetworkPenalty(node, workload)
 
-	// Should have maximum penalty
-	if penalty < 1.0 {
+	// Should have maximum penalty of exactly 1.0
+	if math.Abs(penalty-1.0) > 0.01 {
 		t.Errorf("Expected maximum penalty 1.0 for network unavailable, got %f", penalty)
 	}
 }
