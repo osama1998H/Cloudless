@@ -245,6 +245,14 @@ func (t *QUICTransport) Close() error {
 	return nil
 }
 
+// LocalAddr returns the local address that the transport is listening on
+func (t *QUICTransport) LocalAddr() string {
+	if t.listener != nil {
+		return t.listener.Addr().String()
+	}
+	return ""
+}
+
 // QUICConnection implements the Connection interface
 type QUICConnection struct {
 	peerID    string
