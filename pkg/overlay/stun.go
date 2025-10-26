@@ -6,15 +6,19 @@ import (
 	"net"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/pion/stun"
 	"go.uber.org/zap"
 )
 
 // STUNClient handles STUN protocol for NAT discovery
 type STUNClient struct {
-	servers []string
-	logger  *zap.Logger
-	timeout time.Duration
+	servers      []string
+	logger       *zap.Logger
+	timeout      time.Duration
+	useRFC5780   bool   // Use RFC 5780 for accurate NAT detection
+	altServer    string // Alternate server for RFC 5780 tests
+	rfc5780Disco *RFC5780Discoverer
 }
 
 // NewSTUNClient creates a new STUN client
@@ -29,17 +33,34 @@ func NewSTUNClient(servers []string, logger *zap.Logger) *STUNClient {
 	}
 
 	return &STUNClient{
-		servers: servers,
-		logger:  logger,
-		timeout: 5 * time.Second,
+		servers:    servers,
+		logger:     logger,
+		timeout:    5 * time.Second,
+		useRFC5780: false,
+	}
+}
+
+// EnableRFC5780 enables RFC 5780 NAT behavior discovery for accurate NAT detection
+func (sc *STUNClient) EnableRFC5780(altServer string) {
+	sc.useRFC5780 = true
+	sc.altServer = altServer
+	if sc.useRFC5780 && len(sc.servers) > 0 {
+		sc.rfc5780Disco = NewRFC5780Discoverer(sc.servers[0], altServer, sc.logger)
 	}
 }
 
 // DiscoverNATInfo discovers NAT information using STUN
 func (sc *STUNClient) DiscoverNATInfo(ctx context.Context, localAddr string) (*NATInfo, error) {
+	// Use RFC 5780 for accurate NAT detection if enabled
+	if sc.useRFC5780 && sc.rfc5780Disco != nil {
+		return sc.discoverWithRFC5780(ctx, localAddr)
+	}
+
 	// Parse local address
 	localIP, localPort, err := parseAddress(localAddr)
 	if err != nil {
+		// CLD-REQ-003: Emit metric for STUN failure
+		observability.NATTraversalAttempts.WithLabelValues("stun", "failure").Inc()
 		return nil, fmt.Errorf("failed to parse local address: %w", err)
 	}
 
@@ -58,10 +79,47 @@ func (sc *STUNClient) DiscoverNATInfo(ctx context.Context, localAddr string) (*N
 			continue
 		}
 
+		// CLD-REQ-003: Emit metric for STUN success
+		observability.NATTraversalAttempts.WithLabelValues("stun", "success").Inc()
 		return natInfo, nil
 	}
 
+	// CLD-REQ-003: Emit metric for STUN failure (all servers failed)
+	observability.NATTraversalAttempts.WithLabelValues("stun", "failure").Inc()
 	return nil, fmt.Errorf("all STUN servers failed")
+}
+
+// discoverWithRFC5780 performs NAT discovery using RFC 5780
+func (sc *STUNClient) discoverWithRFC5780(ctx context.Context, localAddr string) (*NATInfo, error) {
+	sc.logger.Info("Using RFC 5780 for NAT discovery")
+
+	behavior, err := sc.rfc5780Disco.DiscoverNATBehavior(ctx, localAddr)
+	if err != nil {
+		// CLD-REQ-003: Emit metric for STUN failure
+		observability.NATTraversalAttempts.WithLabelValues("stun", "failure").Inc()
+		return nil, fmt.Errorf("RFC 5780 discovery failed: %w", err)
+	}
+
+	// Convert NATBehavior to NATInfo
+	natInfo := &NATInfo{
+		Type:       behavior.Type,
+		PublicIP:   behavior.PublicIP,
+		PublicPort: behavior.PublicPort,
+		LocalIP:    behavior.LocalIP,
+		LocalPort:  behavior.LocalPort,
+		Mapped:     behavior.HasNAT,
+	}
+
+	// CLD-REQ-003: Emit metric for STUN success
+	observability.NATTraversalAttempts.WithLabelValues("stun", "success").Inc()
+
+	sc.logger.Info("RFC 5780 NAT discovery complete",
+		zap.String("nat_type", string(natInfo.Type)),
+		zap.String("mapping", string(behavior.MappingBehavior)),
+		zap.String("filtering", string(behavior.FilteringBehavior)),
+	)
+
+	return natInfo, nil
 }
 
 // performSTUNDiscovery performs STUN discovery against a specific server

@@ -11,11 +11,12 @@ import (
 
 // PeerManager manages peers in the overlay network
 type PeerManager struct {
-	nodeID    string
-	transport *QUICTransport
-	logger    *zap.Logger
+	nodeID       string
+	transport    *QUICTransport
+	logger       *zap.Logger
+	natTraversal *NATTraversal // NAT traversal handler
 
-	peers      sync.Map // peerID -> *Peer
+	peers       sync.Map // peerID -> *Peer
 	connections sync.Map // peerID -> Connection
 
 	healthCheckInterval time.Duration
@@ -57,6 +58,12 @@ func NewPeerManager(nodeID string, transport *QUICTransport, config MeshConfig, 
 		ctx:                 ctx,
 		cancel:              cancel,
 	}
+}
+
+// SetNATTraversal sets the NAT traversal handler for this peer manager
+func (pm *PeerManager) SetNATTraversal(natTraversal *NATTraversal) {
+	pm.natTraversal = natTraversal
+	pm.logger.Info("NAT traversal enabled for peer manager")
 }
 
 // Start starts the peer manager
@@ -191,7 +198,23 @@ func (pm *PeerManager) connectToPeerSync(peer *Peer) (Connection, error) {
 	ctx, cancel := context.WithTimeout(pm.ctx, pm.connectionTimeout)
 	defer cancel()
 
-	addr := fmt.Sprintf("%s:%d", peer.Address, peer.Port)
+	// Determine effective address to use for connection
+	addr, strategy, err := pm.determineConnectionAddress(ctx, peer)
+	if err != nil {
+		pm.logger.Warn("Failed to determine connection address, using direct connection",
+			zap.String("peer_id", peer.ID),
+			zap.Error(err),
+		)
+		addr = fmt.Sprintf("%s:%d", peer.Address, peer.Port)
+		strategy = "direct"
+	}
+
+	pm.logger.Debug("Connecting to peer",
+		zap.String("peer_id", peer.ID),
+		zap.String("address", addr),
+		zap.String("strategy", strategy),
+	)
+
 	conn, err := pm.transport.Connect(ctx, peer.ID, addr)
 	if err != nil {
 		pm.updatePeerStatus(peer.ID, PeerStatusUnreachable)
@@ -204,6 +227,7 @@ func (pm *PeerManager) connectToPeerSync(peer *Peer) (Connection, error) {
 	pm.logger.Info("Connected to peer",
 		zap.String("peer_id", peer.ID),
 		zap.String("address", addr),
+		zap.String("strategy", strategy),
 	)
 
 	// Start monitoring connection
@@ -211,6 +235,52 @@ func (pm *PeerManager) connectToPeerSync(peer *Peer) (Connection, error) {
 	go pm.monitorConnection(peer.ID, conn)
 
 	return conn, nil
+}
+
+// determineConnectionAddress determines the best address to use for connecting to a peer
+// Returns: (address, strategy, error)
+func (pm *PeerManager) determineConnectionAddress(ctx context.Context, peer *Peer) (string, string, error) {
+	// If NAT traversal is not enabled, use direct connection
+	if pm.natTraversal == nil {
+		return fmt.Sprintf("%s:%d", peer.Address, peer.Port), "direct", nil
+	}
+
+	// Get local NAT info
+	localNATInfo := pm.natTraversal.GetNATInfo()
+	if localNATInfo == nil {
+		pm.logger.Debug("Local NAT info not available, using direct connection")
+		return fmt.Sprintf("%s:%d", peer.Address, peer.Port), "direct", nil
+	}
+
+	// Determine peer's public address
+	peerPublicAddr := peer.PublicIP
+	if peerPublicAddr == "" {
+		peerPublicAddr = peer.Address
+	}
+	peerAddr := fmt.Sprintf("%s:%d", peerPublicAddr, peer.Port)
+
+	// Determine peer NAT type (use stored info if available, otherwise assume port-restricted)
+	peerNATType := peer.NATType
+	if peerNATType == "" {
+		peerNATType = NATTypePortRestrictedCone // Conservative default
+	}
+
+	pm.logger.Debug("Establishing NAT traversal connection",
+		zap.String("peer_id", peer.ID),
+		zap.String("local_nat", string(localNATInfo.Type)),
+		zap.String("peer_nat", string(peerNATType)),
+	)
+
+	// Use NAT traversal to establish connection
+	localAddr := pm.transport.LocalAddr()
+	connInfo, err := pm.natTraversal.EstablishConnection(ctx, localAddr, peerAddr, peerNATType)
+	if err != nil {
+		return "", "", fmt.Errorf("NAT traversal failed: %w", err)
+	}
+
+	// Return the effective address based on NAT traversal strategy
+	effectiveAddr := connInfo.GetEffectiveAddr()
+	return effectiveAddr, string(connInfo.Strategy), nil
 }
 
 // monitorConnection monitors a connection and handles disconnections

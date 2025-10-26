@@ -73,6 +73,10 @@ type Peer struct {
 	Bandwidth uint64 // Bytes per second
 	LastSeen  time.Time
 	Metadata  map[string]string
+
+	// NAT traversal information
+	NATType   NATType // Detected NAT type for this peer
+	NATInfo   *NATInfo // Full NAT information if available
 }
 
 // PeerStatus represents the status of a peer

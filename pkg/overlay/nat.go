@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/observability"
 	"go.uber.org/zap"
 )
 
@@ -171,14 +172,15 @@ func (nt *NATTraversal) determineStrategy(localNAT, peerNAT NATType) NATTraversa
 		return StrategyDirect
 	}
 
-	// Full cone NAT - can do direct or hole punching
-	if localNAT == NATTypeFullCone || peerNAT == NATTypeFullCone {
-		return StrategyHolePunch
-	}
-
-	// Symmetric NAT - need relay
+	// CLD-REQ-003: Symmetric NAT always requires relay (check first, takes priority)
+	// Symmetric NAT cannot do hole punching regardless of peer NAT type
 	if localNAT == NATTypeSymmetric || peerNAT == NATTypeSymmetric {
 		return StrategyRelay
+	}
+
+	// Full cone NAT - can do hole punching
+	if localNAT == NATTypeFullCone || peerNAT == NATTypeFullCone {
+		return StrategyHolePunch
 	}
 
 	// Port-restricted cone - try hole punching
@@ -198,9 +200,13 @@ func (nt *NATTraversal) establishDirectConnection(ctx context.Context, localAddr
 
 	// Test connectivity
 	if err := nt.stunClient.TestConnectivity(ctx, localAddr, peerAddr); err != nil {
+		// CLD-REQ-003: Emit metric for direct connection failure
+		observability.NATTraversalAttempts.WithLabelValues("direct", "failure").Inc()
 		return nil, fmt.Errorf("direct connection failed: %w", err)
 	}
 
+	// CLD-REQ-003: Emit metric for direct connection success
+	observability.NATTraversalAttempts.WithLabelValues("direct", "success").Inc()
 	return &ConnectionInfo{
 		Strategy:   StrategyDirect,
 		LocalAddr:  localAddr,
@@ -216,11 +222,15 @@ func (nt *NATTraversal) establishHolePunchConnection(ctx context.Context, localA
 
 	// Perform hole punching
 	if err := nt.stunClient.PerformHolePunch(ctx, localAddr, peerAddr); err != nil {
+		// CLD-REQ-003: Emit metric for hole punch failure
+		observability.NATTraversalAttempts.WithLabelValues("holepunch", "failure").Inc()
 		// Hole punching failed, fallback to relay
 		nt.logger.Warn("Hole punching failed, falling back to relay", zap.Error(err))
 		return nt.establishRelayConnection(ctx, localAddr, peerAddr)
 	}
 
+	// CLD-REQ-003: Emit metric for hole punch success
+	observability.NATTraversalAttempts.WithLabelValues("holepunch", "success").Inc()
 	return &ConnectionInfo{
 		Strategy:   StrategyHolePunch,
 		LocalAddr:  localAddr,
@@ -237,14 +247,20 @@ func (nt *NATTraversal) establishRelayConnection(ctx context.Context, localAddr,
 	// Get or create TURN allocation
 	allocation, err := nt.getOrCreateAllocation(ctx, localAddr)
 	if err != nil {
+		// CLD-REQ-003: Emit metric for relay failure
+		observability.NATTraversalAttempts.WithLabelValues("relay", "failure").Inc()
 		return nil, fmt.Errorf("failed to get TURN allocation: %w", err)
 	}
 
 	// Create permission for peer
 	if err := nt.turnClient.CreatePermission(ctx, allocation, peerAddr); err != nil {
+		// CLD-REQ-003: Emit metric for relay failure
+		observability.NATTraversalAttempts.WithLabelValues("relay", "failure").Inc()
 		return nil, fmt.Errorf("failed to create TURN permission: %w", err)
 	}
 
+	// CLD-REQ-003: Emit metric for relay success
+	observability.NATTraversalAttempts.WithLabelValues("relay", "success").Inc()
 	return &ConnectionInfo{
 		Strategy:   StrategyRelay,
 		LocalAddr:  localAddr,

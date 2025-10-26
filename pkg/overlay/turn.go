@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/pion/logging"
 	"github.com/pion/turn/v2"
 	"go.uber.org/zap"
@@ -45,9 +46,13 @@ func (tc *TURNClient) AllocateRelay(ctx context.Context, localAddr string) (*Rel
 			continue
 		}
 
+		// CLD-REQ-003: Emit metric for TURN success
+		observability.NATTraversalAttempts.WithLabelValues("turn", "success").Inc()
 		return allocation, nil
 	}
 
+	// CLD-REQ-003: Emit metric for TURN failure (all servers failed)
+	observability.NATTraversalAttempts.WithLabelValues("turn", "failure").Inc()
 	return nil, fmt.Errorf("all TURN servers failed")
 }
 
