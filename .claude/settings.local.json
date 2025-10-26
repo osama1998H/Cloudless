@@ -27,7 +27,9 @@
       "Bash(docker-compose down)",
       "Bash(docker-compose logs:*)",
       "Bash(docker-compose ps:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(go test:*)",
+      "Bash(gofmt:*)"
     ],
     "deny": [],
     "ask": []
