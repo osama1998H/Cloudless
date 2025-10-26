@@ -2,7 +2,6 @@ package membership
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -796,11 +795,4 @@ func TestManager_EnrollNode_DefaultValues(t *testing.T) {
 
 	// Labels can be nil if not provided in request (no initialization in implementation)
 	// This is acceptable behavior - labels are optional
-}
-
-// cleanup helper function for tests
-func cleanup(t *testing.T, dir string) {
-	if err := os.RemoveAll(dir); err != nil {
-		t.Logf("Warning: failed to cleanup temp dir: %v", err)
-	}
 }

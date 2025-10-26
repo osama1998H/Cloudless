@@ -257,7 +257,12 @@ func TestTokenManager_ValidateToken_InvalidCases(t *testing.T) {
 
 			_, err := tm.ValidateToken(tokenString)
 			if err == nil {
-				t.Errorf("Expected validation error, got nil. Token: %s", tokenString[:50])
+				// Safe token preview (avoid panic on short tokens)
+				tokenPreview := tokenString
+				if len(tokenString) > 50 {
+					tokenPreview = tokenString[:50] + "..."
+				}
+				t.Errorf("Expected validation error, got nil. Token: %s", tokenPreview)
 				return
 			}
 
