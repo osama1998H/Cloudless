@@ -131,6 +131,12 @@ func (sc *STUNClient) performSTUNDiscovery(ctx context.Context, server, localIP 
 		Port: 0, // Dynamic port allocation
 	}
 
+	sc.logger.Debug("STUN using dynamic port allocation",
+		zap.String("local_ip", localIP),
+		zap.Int("original_port", localPort),
+		zap.Int("new_port", localAddr.Port),
+	)
+
 	serverAddr, err := net.ResolveUDPAddr("udp", server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve STUN server: %w", err)
