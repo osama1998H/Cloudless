@@ -176,7 +176,7 @@ func DefaultStorageConfig() StorageConfig {
 	return StorageConfig{
 		DataDir:             "/var/lib/cloudless/storage",
 		ChunkSize:           4 * 1024 * 1024, // 4MB
-		ReplicationFactor:   ReplicationFactorTwo,
+		ReplicationFactor:   ReplicationFactorThree, // CLD-REQ-050 requires R=3 default
 		EnableCompression:   false,
 		RepairInterval:      1 * time.Hour,
 		GCInterval:          24 * time.Hour,

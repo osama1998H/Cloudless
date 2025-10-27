@@ -517,3 +517,23 @@ func (s *Store) Barrier(timeout time.Duration) error {
 	barrier := s.raft.Barrier(timeout)
 	return barrier.Error()
 }
+
+// ApplyRaw applies raw command bytes to the Raft log
+// Used by MetadataStore for CLD-REQ-051 strong consistency
+func (s *Store) ApplyRaw(data []byte) error {
+	if s.raft.State() != raft.Leader {
+		return fmt.Errorf("not leader")
+	}
+
+	future := s.raft.Apply(data, raftTimeout)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("failed to apply command: %w", err)
+	}
+
+	response := future.Response()
+	if err, ok := response.(error); ok {
+		return err
+	}
+
+	return nil
+}

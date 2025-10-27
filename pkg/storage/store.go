@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/raft"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +28,10 @@ type ObjectStore struct {
 }
 
 // NewObjectStore creates a new object store
-func NewObjectStore(config StorageConfig, logger *zap.Logger) (*ObjectStore, error) {
+// raftStore is optional:
+// - If provided: Metadata is strongly consistent via RAFT (CLD-REQ-051) - for coordinators
+// - If nil: Metadata is local-only with sync.Map - for agents
+func NewObjectStore(config StorageConfig, raftStore *raft.Store, logger *zap.Logger) (*ObjectStore, error) {
 	// Create chunk store
 	chunkStore, err := NewChunkStore(config, logger)
 	if err != nil {
@@ -37,8 +41,8 @@ func NewObjectStore(config StorageConfig, logger *zap.Logger) (*ObjectStore, err
 	// Create content engine
 	contentEngine := NewContentEngine(chunkStore, config, logger)
 
-	// Create metadata store
-	metadataStore := NewMetadataStore(logger)
+	// Create metadata store (with or without RAFT)
+	metadataStore := NewMetadataStore(raftStore, logger)
 
 	// Create replication manager
 	replicationManager := NewReplicationManager(config, chunkStore, logger)

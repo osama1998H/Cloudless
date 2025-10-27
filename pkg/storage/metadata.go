@@ -3,16 +3,22 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/raft"
 	"go.uber.org/zap"
 )
 
 // MetadataStore manages bucket and object metadata with strong consistency
+// CLD-REQ-051: Metadata is strongly consistent via RAFT
 type MetadataStore struct {
-	logger *zap.Logger
+	logger    *zap.Logger
+	raftStore *raft.Store
 
+	// Local cache for reads (eventually consistent with RAFT state)
+	// Cache is updated on Apply() and can serve fast reads
 	buckets sync.Map // bucketName -> *Bucket
 	objects sync.Map // bucketName:objectKey -> *Object
 	indices sync.Map // Various indices for fast lookups
@@ -20,21 +26,86 @@ type MetadataStore struct {
 	mu sync.RWMutex
 }
 
-// NewMetadataStore creates a new metadata store
-func NewMetadataStore(logger *zap.Logger) *MetadataStore {
-	return &MetadataStore{
-		logger: logger,
+// NewMetadataStore creates a new metadata store with optional RAFT backing
+// CLD-REQ-051: Provides strong consistency via RAFT consensus
+// If raftStore is nil, falls back to local-only sync.Map storage (for agents)
+// If raftStore is provided, uses RAFT for strong consistency (for coordinators)
+func NewMetadataStore(raftStore *raft.Store, logger *zap.Logger) *MetadataStore {
+	ms := &MetadataStore{
+		logger:    logger,
+		raftStore: raftStore,
 	}
+
+	// Initialize cache from RAFT state on startup (if RAFT is enabled)
+	if raftStore != nil {
+		ms.initializeFromRAFT()
+		logger.Info("MetadataStore initialized with RAFT backing (CLD-REQ-051)")
+	} else {
+		logger.Info("MetadataStore initialized without RAFT (local-only mode for agents)")
+	}
+
+	return ms
+}
+
+// initializeFromRAFT loads metadata from RAFT store into local cache
+func (ms *MetadataStore) initializeFromRAFT() {
+	// Get all keys from RAFT store
+	all, err := ms.raftStore.GetAll()
+	if err != nil {
+		ms.logger.Error("Failed to load metadata from RAFT", zap.Error(err))
+		return
+	}
+
+	bucketsLoaded := 0
+	objectsLoaded := 0
+
+	// Reconstruct caches from RAFT state
+	for key, value := range all {
+		if strings.HasPrefix(key, "bucket:") {
+			bucketName := strings.TrimPrefix(key, "bucket:")
+			var bucket Bucket
+			if err := json.Unmarshal(value, &bucket); err != nil {
+				ms.logger.Error("Failed to unmarshal bucket from RAFT",
+					zap.String("bucket", bucketName),
+					zap.Error(err))
+				continue
+			}
+			ms.buckets.Store(bucketName, &bucket)
+			bucketsLoaded++
+		} else if strings.HasPrefix(key, "object:") {
+			// Key format: "object:bucketName:objectKey"
+			parts := strings.SplitN(strings.TrimPrefix(key, "object:"), ":", 2)
+			if len(parts) != 2 {
+				ms.logger.Warn("Invalid object key format", zap.String("key", key))
+				continue
+			}
+			var object Object
+			if err := json.Unmarshal(value, &object); err != nil {
+				ms.logger.Error("Failed to unmarshal object from RAFT",
+					zap.String("key", key),
+					zap.Error(err))
+				continue
+			}
+			objectKey := ms.getObjectKey(object.Bucket, object.Key)
+			ms.objects.Store(objectKey, &object)
+			objectsLoaded++
+		}
+	}
+
+	ms.logger.Info("Initialized metadata from RAFT",
+		zap.Int("buckets", bucketsLoaded),
+		zap.Int("objects", objectsLoaded))
 }
 
 // Bucket Operations
 
-// CreateBucket creates a new bucket
+// CreateBucket creates a new bucket with RAFT consensus
+// CLD-REQ-051: Strong consistency via RAFT
 func (ms *MetadataStore) CreateBucket(bucket *Bucket) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
-	// Check if bucket already exists
+	// Check if bucket already exists (read from cache)
 	if _, exists := ms.buckets.Load(bucket.Name); exists {
 		return fmt.Errorf("bucket already exists: %s", bucket.Name)
 	}
@@ -49,15 +120,70 @@ func (ms *MetadataStore) CreateBucket(bucket *Bucket) error {
 		bucket.Labels = make(map[string]string)
 	}
 
-	// Store bucket
+	// Serialize bucket metadata
+	value, err := json.Marshal(bucket)
+	if err != nil {
+		return fmt.Errorf("failed to serialize bucket: %w", err)
+	}
+
+	// Create RAFT command
+	cmd := &raft.MetadataCommand{
+		Op:     "create_bucket",
+		Bucket: bucket.Name,
+		Value:  value,
+	}
+
+	// Apply to RAFT (ensures strong consistency)
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata command: %w", err)
+	}
+
+	// IMPORTANT: This blocks until RAFT consensus is reached
+	// Guarantees strong consistency across all coordinator replicas
+	if err := ms.applyRAFTCommand(cmdBytes); err != nil {
+		return fmt.Errorf("failed to apply bucket creation to RAFT: %w", err)
+	}
+
+	// Update local cache (RAFT has committed)
 	ms.buckets.Store(bucket.Name, bucket)
 
-	ms.logger.Info("Created bucket",
+	ms.logger.Info("Created bucket via RAFT",
 		zap.String("bucket", bucket.Name),
 		zap.String("storage_class", string(bucket.StorageClass)),
 	)
 
 	return nil
+}
+
+// applyRAFTCommand applies a command to RAFT and waits for consensus
+// CLD-REQ-051: Ensures strong consistency by blocking until RAFT commit
+// If raftStore is nil (agents), this is a no-op as cache is already updated
+func (ms *MetadataStore) applyRAFTCommand(cmdBytes []byte) error {
+	// If no RAFT store (agent mode), skip RAFT replication
+	if ms.raftStore == nil {
+		// Local-only mode: cache is the source of truth
+		// No strong consistency guarantee
+		return nil
+	}
+
+	// RAFT mode (coordinator): ensure strong consistency
+
+	// Check if this node is the RAFT leader
+	if !ms.raftStore.IsLeader() {
+		leaderAddr := ms.raftStore.GetLeader()
+		if leaderAddr == "" {
+			return fmt.Errorf("no RAFT leader available")
+		}
+		return fmt.Errorf("not RAFT leader, redirect to: %s", leaderAddr)
+	}
+
+	// Apply command to RAFT log
+	// This will:
+	// 1. Replicate to majority of nodes
+	// 2. Apply to FSM on all nodes via applyMetadataCommand()
+	// 3. Return once committed (strong consistency guarantee)
+	return ms.raftStore.ApplyRaw(cmdBytes)
 }
 
 // GetBucket retrieves a bucket by name
@@ -93,7 +219,8 @@ func (ms *MetadataStore) UpdateBucket(bucket *Bucket) error {
 	return nil
 }
 
-// DeleteBucket deletes a bucket (must be empty)
+// DeleteBucket deletes a bucket (must be empty) with RAFT consensus
+// CLD-REQ-051: Strong consistency via RAFT
 func (ms *MetadataStore) DeleteBucket(name string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -118,10 +245,26 @@ func (ms *MetadataStore) DeleteBucket(name string) error {
 		return fmt.Errorf("bucket not empty: %s (contains %d objects)", name, objectCount)
 	}
 
-	// Delete bucket
+	// Create RAFT command
+	cmd := &raft.MetadataCommand{
+		Op:     "delete_bucket",
+		Bucket: name,
+	}
+
+	// Apply to RAFT
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata command: %w", err)
+	}
+
+	if err := ms.applyRAFTCommand(cmdBytes); err != nil {
+		return fmt.Errorf("failed to apply bucket deletion to RAFT: %w", err)
+	}
+
+	// Delete from local cache (RAFT has committed)
 	ms.buckets.Delete(name)
 
-	ms.logger.Info("Deleted bucket",
+	ms.logger.Info("Deleted bucket via RAFT",
 		zap.String("bucket", name),
 	)
 
@@ -162,7 +305,8 @@ func (ms *MetadataStore) ListBuckets() ([]*BucketMetadata, error) {
 
 // Object Operations
 
-// PutObject stores object metadata
+// PutObject stores object metadata with RAFT consensus
+// CLD-REQ-051: Strong consistency via RAFT
 func (ms *MetadataStore) PutObject(object *Object) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -197,7 +341,6 @@ func (ms *MetadataStore) PutObject(object *Object) error {
 
 	// Update bucket usage
 	bucket.UsedBytes = bucket.UsedBytes - oldSize + object.Size
-	ms.buckets.Store(bucket.Name, bucket)
 
 	// Check quota
 	if bucket.QuotaBytes > 0 && bucket.UsedBytes > bucket.QuotaBytes {
@@ -210,10 +353,35 @@ func (ms *MetadataStore) PutObject(object *Object) error {
 		object.Version++
 	}
 
-	// Store object
-	ms.objects.Store(objectKey, object)
+	// Serialize object metadata
+	value, err := json.Marshal(object)
+	if err != nil {
+		return fmt.Errorf("failed to serialize object: %w", err)
+	}
 
-	ms.logger.Debug("Put object",
+	// Create RAFT command
+	cmd := &raft.MetadataCommand{
+		Op:     "put_object_meta",
+		Bucket: object.Bucket,
+		Key:    object.Key,
+		Value:  value,
+	}
+
+	// Apply to RAFT
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata command: %w", err)
+	}
+
+	if err := ms.applyRAFTCommand(cmdBytes); err != nil {
+		return fmt.Errorf("failed to apply object metadata to RAFT: %w", err)
+	}
+
+	// Update local caches (RAFT has committed)
+	ms.objects.Store(objectKey, object)
+	ms.buckets.Store(bucket.Name, bucket)
+
+	ms.logger.Debug("Put object via RAFT",
 		zap.String("bucket", object.Bucket),
 		zap.String("key", object.Key),
 		zap.Int64("size", object.Size),
@@ -240,7 +408,8 @@ func (ms *MetadataStore) GetObject(bucket, key string) (*Object, error) {
 	return nil, fmt.Errorf("object not found: %s/%s", bucket, key)
 }
 
-// DeleteObject deletes object metadata
+// DeleteObject deletes object metadata with RAFT consensus
+// CLD-REQ-051: Strong consistency via RAFT
 func (ms *MetadataStore) DeleteObject(bucket, key string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -255,6 +424,26 @@ func (ms *MetadataStore) DeleteObject(bucket, key string) error {
 
 	object := o.(*Object)
 
+	// Create RAFT command
+	cmd := &raft.MetadataCommand{
+		Op:     "delete_object_meta",
+		Bucket: bucket,
+		Key:    key,
+	}
+
+	// Apply to RAFT
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata command: %w", err)
+	}
+
+	if err := ms.applyRAFTCommand(cmdBytes); err != nil {
+		return fmt.Errorf("failed to apply object deletion to RAFT: %w", err)
+	}
+
+	// Update local caches (RAFT has committed)
+	ms.objects.Delete(objectKey)
+
 	// Update bucket usage
 	if b, ok := ms.buckets.Load(bucket); ok {
 		bkt := b.(*Bucket)
@@ -262,10 +451,7 @@ func (ms *MetadataStore) DeleteObject(bucket, key string) error {
 		ms.buckets.Store(bucket, bkt)
 	}
 
-	// Delete object
-	ms.objects.Delete(objectKey)
-
-	ms.logger.Info("Deleted object",
+	ms.logger.Info("Deleted object via RAFT",
 		zap.String("bucket", bucket),
 		zap.String("key", key),
 	)

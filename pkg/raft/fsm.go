@@ -21,6 +21,15 @@ type Command struct {
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 }
 
+// MetadataCommand represents a storage metadata operation
+// Used for CLD-REQ-051: Metadata (buckets, manifests) is strongly consistent via RAFT
+type MetadataCommand struct {
+	Op     string `json:"op"` // create_bucket, delete_bucket, put_object_meta, delete_object_meta
+	Bucket string `json:"bucket,omitempty"`
+	Key    string `json:"key,omitempty"`    // For object operations
+	Value  []byte `json:"value,omitempty"` // Serialized Bucket or Object metadata
+}
+
 // BatchCommand represents multiple commands to be applied atomically
 type BatchCommand struct {
 	Commands []*Command `json:"commands"`
@@ -54,7 +63,13 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Try to parse as batch command first
+	// Try to parse as metadata command first (CLD-REQ-051)
+	var metaCmd MetadataCommand
+	if err := json.Unmarshal(l.Data, &metaCmd); err == nil && metaCmd.Op != "" && metaCmd.Bucket != "" {
+		return f.applyMetadataCommand(&metaCmd)
+	}
+
+	// Try to parse as batch command
 	var batch BatchCommand
 	if err := json.Unmarshal(l.Data, &batch); err == nil && len(batch.Commands) > 0 {
 		return f.applyBatch(&batch)
@@ -309,6 +324,48 @@ func (s *FSMSnapshot) Persist(sink raft.SnapshotSink) error {
 func (s *FSMSnapshot) Release() {
 	// Nothing to release as we work with copies
 	s.logger.Debug("Released snapshot")
+}
+
+// applyMetadataCommand applies a metadata operation (CLD-REQ-051)
+func (f *FSM) applyMetadataCommand(cmd *MetadataCommand) interface{} {
+	switch cmd.Op {
+	case "create_bucket":
+		return f.applyCreateBucket(cmd.Bucket, cmd.Value)
+	case "delete_bucket":
+		return f.applyDeleteBucket(cmd.Bucket)
+	case "put_object_meta":
+		return f.applyPutObjectMeta(cmd.Bucket, cmd.Key, cmd.Value)
+	case "delete_object_meta":
+		return f.applyDeleteObjectMeta(cmd.Bucket, cmd.Key)
+	default:
+		err := fmt.Errorf("unknown metadata operation: %s", cmd.Op)
+		f.logger.Error("Unknown metadata operation", zap.String("op", cmd.Op))
+		return err
+	}
+}
+
+// applyCreateBucket stores bucket metadata
+func (f *FSM) applyCreateBucket(bucketName string, value []byte) interface{} {
+	key := "bucket:" + bucketName
+	return f.applySet(key, value, 0)
+}
+
+// applyDeleteBucket removes bucket metadata
+func (f *FSM) applyDeleteBucket(bucketName string) interface{} {
+	key := "bucket:" + bucketName
+	return f.applyDelete(key)
+}
+
+// applyPutObjectMeta stores object metadata
+func (f *FSM) applyPutObjectMeta(bucket, objectKey string, value []byte) interface{} {
+	key := fmt.Sprintf("object:%s:%s", bucket, objectKey)
+	return f.applySet(key, value, 0)
+}
+
+// applyDeleteObjectMeta removes object metadata
+func (f *FSM) applyDeleteObjectMeta(bucket, objectKey string) interface{} {
+	key := fmt.Sprintf("object:%s:%s", bucket, objectKey)
+	return f.applyDelete(key)
 }
 
 // CleanupExpired removes expired entries from the FSM

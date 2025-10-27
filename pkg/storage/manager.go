@@ -31,11 +31,14 @@ type StorageManager struct {
 }
 
 // NewStorageManager creates a new storage manager
+// Note: StorageManager runs on agents and doesn't have RAFT
+// For coordinator with RAFT, see coordinator package
 func NewStorageManager(config StorageConfig, logger *zap.Logger) (*StorageManager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create object store
-	objectStore, err := NewObjectStore(config, logger)
+	// Create object store without RAFT (agent mode)
+	// Agents use local-only metadata storage
+	objectStore, err := NewObjectStore(config, nil, logger)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create object store: %w", err)

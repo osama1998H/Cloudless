@@ -3,6 +3,7 @@ package overlay
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -153,12 +154,34 @@ type LoadBalancerStats struct {
 }
 
 // EndpointStats contains statistics for an endpoint
+// NOTE: AverageLatency and ActiveConnections use atomic-compatible types
+// - AverageLatency is int64 (nanoseconds) for atomic.LoadInt64/StoreInt64/CompareAndSwapInt64
+// - ActiveConnections is int32 for atomic.AddInt32/LoadInt32/CompareAndSwapInt32
+// Use helper methods for type-safe access
 type EndpointStats struct {
 	EndpointID        string
-	Requests          uint64
-	Failures          uint64
-	AverageLatency    time.Duration
-	ActiveConnections int
+	Requests          uint64 // Atomic via atomic.AddUint64/LoadUint64
+	Failures          uint64 // Atomic via atomic.AddUint64/LoadUint64
+	AverageLatency    int64  // Atomic int64 (nanoseconds) - use GetAverageLatency()/SetAverageLatency()
+	ActiveConnections int32  // Atomic int32 - use atomic operations or GetActiveConnections()
+}
+
+// GetAverageLatency returns the average latency as a time.Duration
+// Thread-safe: uses atomic.LoadInt64
+func (es *EndpointStats) GetAverageLatency() time.Duration {
+	return time.Duration(atomic.LoadInt64(&es.AverageLatency))
+}
+
+// SetAverageLatency sets the average latency from a time.Duration
+// Thread-safe: uses atomic.StoreInt64
+func (es *EndpointStats) SetAverageLatency(d time.Duration) {
+	atomic.StoreInt64(&es.AverageLatency, int64(d))
+}
+
+// GetActiveConnections returns the active connection count as an int
+// Thread-safe: uses atomic.LoadInt32
+func (es *EndpointStats) GetActiveConnections() int {
+	return int(atomic.LoadInt32(&es.ActiveConnections))
 }
 
 // LoadBalancingAlgorithm represents a load balancing algorithm

@@ -162,12 +162,13 @@ func (lb *L4LoadBalancer) selectLeastConnections(endpoints []Endpoint) *Endpoint
 	}
 
 	var best *Endpoint
-	minConnections := int(^uint(0) >> 1) // Max int
+	minConnections := int32(^uint32(0) >> 1) // Max int32
 
 	for i := range endpoints {
 		stats := lb.getEndpointStats(endpoints[i].ID)
-		if stats.ActiveConnections < minConnections {
-			minConnections = stats.ActiveConnections
+		activeConns := atomic.LoadInt32(&stats.ActiveConnections)
+		if activeConns < minConnections {
+			minConnections = activeConns
 			best = &endpoints[i]
 		}
 	}
@@ -215,42 +216,74 @@ func (lb *L4LoadBalancer) UpdateEndpoints(serviceName string, endpoints []Endpoi
 }
 
 // GetStats returns load balancing statistics for a service
+// Thread-safe: Returns a deep copy with atomic loads to prevent external mutation
 func (lb *L4LoadBalancer) GetStats(serviceName string) (*LoadBalancerStats, error) {
 	if s, ok := lb.stats.Load(serviceName); ok {
 		stats := s.(*LoadBalancerStats)
-		return stats, nil
+
+		// Create a deep copy to prevent external mutation
+		statsCopy := &LoadBalancerStats{
+			ServiceName:   stats.ServiceName,
+			TotalRequests: atomic.LoadUint64(&stats.TotalRequests),
+			EndpointStats: make(map[string]*EndpointStats),
+			LastUpdated:   stats.LastUpdated, // Safe: time.Time is immutable
+		}
+
+		// Copy endpoint stats with atomic loads
+		for epID, epStats := range stats.EndpointStats {
+			statsCopy.EndpointStats[epID] = &EndpointStats{
+				EndpointID:        epStats.EndpointID,
+				Requests:          atomic.LoadUint64(&epStats.Requests),
+				Failures:          atomic.LoadUint64(&epStats.Failures),
+				AverageLatency:    atomic.LoadInt64(&epStats.AverageLatency),
+				ActiveConnections: atomic.LoadInt32(&epStats.ActiveConnections),
+			}
+		}
+
+		return statsCopy, nil
 	}
 
 	// Return empty stats if service not found
 	return &LoadBalancerStats{
 		ServiceName:   serviceName,
+		TotalRequests: 0,
 		EndpointStats: make(map[string]*EndpointStats),
 		LastUpdated:   time.Now(),
 	}, nil
 }
 
 // updateRequestStats updates request statistics
+// Thread-safe: Uses copy-on-write pattern for LoadBalancerStats to avoid races on LastUpdated field
 func (lb *L4LoadBalancer) updateRequestStats(serviceName, endpointID string) {
-	// Update service stats
-	var stats *LoadBalancerStats
+	// Create or update service stats with copy-on-write pattern
+	var newStats *LoadBalancerStats
 	if s, ok := lb.stats.Load(serviceName); ok {
-		stats = s.(*LoadBalancerStats)
+		oldStats := s.(*LoadBalancerStats)
+		// Create new stats struct with updated values
+		newStats = &LoadBalancerStats{
+			ServiceName:   oldStats.ServiceName,
+			TotalRequests: atomic.LoadUint64(&oldStats.TotalRequests),
+			EndpointStats: oldStats.EndpointStats, // Share map reference (immutable from this function's perspective)
+			LastUpdated:   time.Now(),             // Safe: new struct not yet shared with other goroutines
+		}
 	} else {
-		stats = &LoadBalancerStats{
+		newStats = &LoadBalancerStats{
 			ServiceName:   serviceName,
+			TotalRequests: 0,
 			EndpointStats: make(map[string]*EndpointStats),
 			LastUpdated:   time.Now(),
 		}
 	}
 
-	atomic.AddUint64(&stats.TotalRequests, 1)
-	stats.LastUpdated = time.Now()
-	lb.stats.Store(serviceName, stats)
+	// Increment total requests atomically
+	atomic.AddUint64(&newStats.TotalRequests, 1)
 
-	// Update endpoint stats
+	// Store the new stats struct atomically (replaces entire pointer)
+	lb.stats.Store(serviceName, newStats)
+
+	// Update endpoint stats atomically
 	epStats := lb.getEndpointStats(endpointID)
 	atomic.AddUint64(&epStats.Requests, 1)
-	lb.endpointStats.Store(endpointID, epStats)
 }
 
 // RecordFailure records a failure for an endpoint
@@ -266,39 +299,57 @@ func (lb *L4LoadBalancer) RecordFailure(serviceName, endpointID string) {
 }
 
 // RecordLatency records latency for an endpoint
+// Thread-safe: Uses atomic CompareAndSwap loop for exponential moving average calculation
 func (lb *L4LoadBalancer) RecordLatency(endpointID string, latency time.Duration) {
 	epStats := lb.getEndpointStats(endpointID)
 
-	// Calculate running average (simplified)
-	currentAvg := epStats.AverageLatency
 	requests := atomic.LoadUint64(&epStats.Requests)
 
 	if requests == 0 {
-		epStats.AverageLatency = latency
-	} else {
-		// Exponential moving average
-		alpha := 0.1
-		newAvg := time.Duration(float64(currentAvg)*(1-alpha) + float64(latency)*alpha)
-		epStats.AverageLatency = newAvg
+		// First request, just store the latency
+		atomic.StoreInt64(&epStats.AverageLatency, int64(latency))
+		return
 	}
 
-	lb.endpointStats.Store(endpointID, epStats)
+	// Exponential moving average with atomic CAS loop
+	const alpha = 0.1
+	for {
+		currentAvgNanos := atomic.LoadInt64(&epStats.AverageLatency)
+		// Calculate new average: newAvg = currentAvg * (1-alpha) + latency * alpha
+		newAvgNanos := int64(float64(currentAvgNanos)*(1-alpha) + float64(latency)*alpha)
+
+		// Attempt to update atomically
+		if atomic.CompareAndSwapInt64(&epStats.AverageLatency, currentAvgNanos, newAvgNanos) {
+			return // Successfully updated
+		}
+		// CAS failed (another goroutine updated the value), retry with new current value
+	}
 }
 
 // IncrementActiveConnections increments the active connection count for an endpoint
+// Thread-safe: Uses atomic.AddInt32
 func (lb *L4LoadBalancer) IncrementActiveConnections(endpointID string) {
 	epStats := lb.getEndpointStats(endpointID)
-	epStats.ActiveConnections++
-	lb.endpointStats.Store(endpointID, epStats)
+	atomic.AddInt32(&epStats.ActiveConnections, 1)
 }
 
 // DecrementActiveConnections decrements the active connection count for an endpoint
+// Thread-safe: Uses atomic CompareAndSwap loop to safely decrement without going negative
 func (lb *L4LoadBalancer) DecrementActiveConnections(endpointID string) {
 	epStats := lb.getEndpointStats(endpointID)
-	if epStats.ActiveConnections > 0 {
-		epStats.ActiveConnections--
+
+	// Use CAS loop to safely decrement without going negative
+	for {
+		current := atomic.LoadInt32(&epStats.ActiveConnections)
+		if current <= 0 {
+			return // Already at zero, nothing to decrement
+		}
+		// Attempt to decrement atomically
+		if atomic.CompareAndSwapInt32(&epStats.ActiveConnections, current, current-1) {
+			return // Successfully decremented
+		}
+		// CAS failed (another goroutine modified the value), retry
 	}
-	lb.endpointStats.Store(endpointID, epStats)
 }
 
 // getEndpointStats gets or creates endpoint statistics

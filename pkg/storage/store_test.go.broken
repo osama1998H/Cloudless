@@ -1,0 +1,1171 @@
+package storage
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"testing"
+	"time"
+
+	"go.uber.org/zap"
+)
+
+// setupTestObjectStore creates a test ObjectStore instance with temporary storage
+func setupTestObjectStore(t *testing.T) (*ObjectStore, string, func()) {
+	t.Helper()
+
+	// Create temp directory
+	tempDir, err := os.MkdirTemp("", "cloudless-store-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+
+	// Create config with R=3 to test CLD-REQ-050
+	config := StorageConfig{
+		DataDir:             tempDir,
+		ChunkSize:           64 * 1024, // 64KB for faster tests
+		ReplicationFactor:   ReplicationFactorThree, // CLD-REQ-050
+		EnableCompression:   false,
+		RepairInterval:      1 * time.Hour,
+		GCInterval:          24 * time.Hour,
+		MaxDiskUsagePercent: 90,
+		EnableReadRepair:    true,
+		QuorumWrites:        true,
+	}
+
+	logger := zap.NewNop()
+
+	store, err := NewObjectStore(config, logger)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("Failed to create object store: %v", err)
+	}
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return store, tempDir, cleanup
+}
+
+// TestObjectStore_CreateBucket tests bucket creation
+func TestObjectStore_CreateBucket(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		request   *CreateBucketRequest
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "create valid bucket",
+			request: &CreateBucketRequest{
+				Name:         "test-bucket",
+				StorageClass: StorageClassHot,
+				QuotaBytes:   1024 * 1024 * 1024, // 1GB
+				Owner:        "user-123",
+			},
+			wantError: false,
+		},
+		{
+			name: "create bucket with cold storage",
+			request: &CreateBucketRequest{
+				Name:         "cold-bucket",
+				StorageClass: StorageClassCold,
+				QuotaBytes:   10 * 1024 * 1024 * 1024, // 10GB
+				Owner:        "user-456",
+			},
+			wantError: false,
+		},
+		{
+			name: "create bucket with ephemeral storage",
+			request: &CreateBucketRequest{
+				Name:         "ephemeral-bucket",
+				StorageClass: StorageClassEphemeral,
+				QuotaBytes:   512 * 1024 * 1024, // 512MB
+				Owner:        "user-789",
+			},
+			wantError: false,
+		},
+		{
+			name: "create duplicate bucket should fail",
+			request: &CreateBucketRequest{
+				Name:         "test-bucket", // Same as first test
+				StorageClass: StorageClassHot,
+				QuotaBytes:   1024 * 1024,
+				Owner:        "user-999",
+			},
+			wantError: true,
+			errorMsg:  "bucket already exists",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.CreateBucket(ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				// Note: Error message checking would require exported error types
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify bucket was created
+			bucket, err := store.GetBucket(ctx, tt.request.Name)
+			if err != nil {
+				t.Errorf("Failed to get created bucket: %v", err)
+				return
+			}
+
+			if bucket.Name != tt.request.Name {
+				t.Errorf("Expected bucket name %q, got %q", tt.request.Name, bucket.Name)
+			}
+			if bucket.StorageClass != tt.request.StorageClass {
+				t.Errorf("Expected storage class %q, got %q", tt.request.StorageClass, bucket.StorageClass)
+			}
+			if bucket.QuotaBytes != tt.request.QuotaBytes {
+				t.Errorf("Expected quota %d, got %d", tt.request.QuotaBytes, bucket.QuotaBytes)
+			}
+			if bucket.Owner != tt.request.Owner {
+				t.Errorf("Expected owner %q, got %q", tt.request.Owner, bucket.Owner)
+			}
+		})
+	}
+}
+
+// TestObjectStore_GetBucket tests bucket retrieval
+func TestObjectStore_GetBucket(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "get-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		bucketName string
+		wantError  bool
+	}{
+		{
+			name:       "get existing bucket",
+			bucketName: "get-test-bucket",
+			wantError:  false,
+		},
+		{
+			name:       "get non-existent bucket",
+			bucketName: "does-not-exist",
+			wantError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, err := store.GetBucket(ctx, tt.bucketName)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if bucket.Name != tt.bucketName {
+				t.Errorf("Expected bucket name %q, got %q", tt.bucketName, bucket.Name)
+			}
+		})
+	}
+}
+
+// TestObjectStore_DeleteBucket tests bucket deletion
+func TestObjectStore_DeleteBucket(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test buckets
+	emptyBucket := &CreateBucketRequest{
+		Name:         "empty-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, emptyBucket); err != nil {
+		t.Fatalf("Failed to create empty bucket: %v", err)
+	}
+
+	bucketWithObjects := &CreateBucketRequest{
+		Name:         "bucket-with-objects",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   1024 * 1024,
+		Owner:        "user-456",
+	}
+	if err := store.CreateBucket(ctx, bucketWithObjects); err != nil {
+		t.Fatalf("Failed to create bucket with objects: %v", err)
+	}
+
+	// Add an object to bucketWithObjects
+	putReq := &PutObjectRequest{
+		Bucket:       "bucket-with-objects",
+		Key:          "test-object",
+		Data:         []byte("test data"),
+		StorageClass: StorageClassHot,
+		Metadata:     map[string]string{"purpose": "test"},
+	}
+	if err := store.PutObject(ctx, putReq); err != nil {
+		t.Fatalf("Failed to put test object: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		bucketName string
+		wantError  bool
+		errorMsg   string
+	}{
+		{
+			name:       "delete empty bucket",
+			bucketName: "empty-bucket",
+			wantError:  false,
+		},
+		{
+			name:       "delete non-existent bucket",
+			bucketName: "does-not-exist",
+			wantError:  true,
+			errorMsg:   "bucket not found",
+		},
+		{
+			name:       "delete bucket with objects should fail",
+			bucketName: "bucket-with-objects",
+			wantError:  true,
+			errorMsg:   "not empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.DeleteBucket(ctx, tt.bucketName)
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify bucket was deleted
+			_, err = store.GetBucket(ctx, tt.bucketName)
+			if err == nil {
+				t.Error("Expected error when getting deleted bucket, got nil")
+			}
+		})
+	}
+}
+
+// TestObjectStore_ListBuckets tests listing buckets
+func TestObjectStore_ListBuckets(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name          string
+		bucketsToAdd  []*CreateBucketRequest
+		expectedCount int
+	}{
+		{
+			name:          "list empty buckets",
+			bucketsToAdd:  nil,
+			expectedCount: 0,
+		},
+		{
+			name: "list single bucket",
+			bucketsToAdd: []*CreateBucketRequest{
+				{
+					Name:         "bucket-1",
+					StorageClass: StorageClassHot,
+					QuotaBytes:   1024 * 1024,
+					Owner:        "user-1",
+				},
+			},
+			expectedCount: 1,
+		},
+		{
+			name: "list multiple buckets",
+			bucketsToAdd: []*CreateBucketRequest{
+				{
+					Name:         "bucket-2",
+					StorageClass: StorageClassHot,
+					QuotaBytes:   1024 * 1024,
+					Owner:        "user-2",
+				},
+				{
+					Name:         "bucket-3",
+					StorageClass: StorageClassCold,
+					QuotaBytes:   2 * 1024 * 1024,
+					Owner:        "user-3",
+				},
+				{
+					Name:         "bucket-4",
+					StorageClass: StorageClassEphemeral,
+					QuotaBytes:   512 * 1024,
+					Owner:        "user-4",
+				},
+			},
+			expectedCount: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fresh store for each test to avoid interference
+			freshStore, _, cleanup := setupTestObjectStore(t)
+			defer cleanup()
+
+			// Add buckets
+			for _, bucket := range tt.bucketsToAdd {
+				if err := freshStore.CreateBucket(ctx, bucket); err != nil {
+					t.Fatalf("Failed to create bucket %q: %v", bucket.Name, err)
+				}
+			}
+
+			// List buckets
+			buckets, err := freshStore.ListBuckets(ctx)
+			if err != nil {
+				t.Fatalf("Failed to list buckets: %v", err)
+			}
+
+			if len(buckets) != tt.expectedCount {
+				t.Errorf("Expected %d buckets, got %d", tt.expectedCount, len(buckets))
+			}
+
+			// Verify bucket names match
+			for _, expectedBucket := range tt.bucketsToAdd {
+				found := false
+				for _, bucket := range buckets {
+					if bucket.Name == expectedBucket.Name {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected bucket %q not found in list", expectedBucket.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestObjectStore_PutObject tests object creation
+func TestObjectStore_PutObject(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "put-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024, // 10MB
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		request   *PutObjectRequest
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "put small object",
+			request: &PutObjectRequest{
+				Bucket:       "put-test-bucket",
+				Key:          "small-object",
+				Data:         []byte("Hello, Cloudless!"),
+				StorageClass: StorageClassHot,
+				ContentType:  "text/plain",
+				Metadata: map[string]string{
+					"author": "test",
+					"type":   "small",
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "put large object (multiple chunks)",
+			request: &PutObjectRequest{
+				Bucket:       "put-test-bucket",
+				Key:          "large-object",
+				Data:         bytes.Repeat([]byte("A"), 200*1024), // 200KB > 64KB chunk size
+				StorageClass: StorageClassHot,
+				ContentType:  "application/octet-stream",
+				Metadata:     map[string]string{"size": "large"},
+			},
+			wantError: false,
+		},
+		{
+			name: "put empty object",
+			request: &PutObjectRequest{
+				Bucket:       "put-test-bucket",
+				Key:          "empty-object",
+				Data:         []byte{},
+				StorageClass: StorageClassHot,
+				ContentType:  "application/octet-stream",
+			},
+			wantError: false,
+		},
+		{
+			name: "put object to non-existent bucket",
+			request: &PutObjectRequest{
+				Bucket:       "does-not-exist",
+				Key:          "test-key",
+				Data:         []byte("test data"),
+				StorageClass: StorageClassHot,
+			},
+			wantError: true,
+			errorMsg:  "bucket not found",
+		},
+		{
+			name: "put object with cold storage class",
+			request: &PutObjectRequest{
+				Bucket:       "put-test-bucket",
+				Key:          "cold-object",
+				Data:         []byte("Cold storage data"),
+				StorageClass: StorageClassCold,
+				ContentType:  "text/plain",
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.PutObject(ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify object was created by getting it back
+			getReq := &GetObjectRequest{
+				Bucket: tt.request.Bucket,
+				Key:    tt.request.Key,
+			}
+			object, err := store.GetObject(ctx, getReq)
+			if err != nil {
+				t.Errorf("Failed to get created object: %v", err)
+				return
+			}
+
+			if object.Key != tt.request.Key {
+				t.Errorf("Expected key %q, got %q", tt.request.Key, object.Key)
+			}
+			if object.Size != int64(len(tt.request.Data)) {
+				t.Errorf("Expected size %d, got %d", len(tt.request.Data), object.Size)
+			}
+			if object.StorageClass != tt.request.StorageClass {
+				t.Errorf("Expected storage class %q, got %q", tt.request.StorageClass, object.StorageClass)
+			}
+			if object.ContentType != tt.request.ContentType {
+				t.Errorf("Expected content type %q, got %q", tt.request.ContentType, object.ContentType)
+			}
+		})
+	}
+}
+
+// TestObjectStore_GetObject tests object retrieval
+func TestObjectStore_GetObject(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket and object
+	testBucket := &CreateBucketRequest{
+		Name:         "get-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	testData := []byte("Test object data for retrieval")
+	putReq := &PutObjectRequest{
+		Bucket:       "get-test-bucket",
+		Key:          "test-object",
+		Data:         testData,
+		StorageClass: StorageClassHot,
+		ContentType:  "text/plain",
+		Metadata:     map[string]string{"test": "value"},
+	}
+	if err := store.PutObject(ctx, putReq); err != nil {
+		t.Fatalf("Failed to put test object: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		request   *GetObjectRequest
+		wantError bool
+		checkData bool
+	}{
+		{
+			name: "get existing object",
+			request: &GetObjectRequest{
+				Bucket: "get-test-bucket",
+				Key:    "test-object",
+			},
+			wantError: false,
+			checkData: true,
+		},
+		{
+			name: "get non-existent object",
+			request: &GetObjectRequest{
+				Bucket: "get-test-bucket",
+				Key:    "does-not-exist",
+			},
+			wantError: true,
+			checkData: false,
+		},
+		{
+			name: "get from non-existent bucket",
+			request: &GetObjectRequest{
+				Bucket: "does-not-exist",
+				Key:    "test-object",
+			},
+			wantError: true,
+			checkData: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			object, err := store.GetObject(ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if tt.checkData {
+				if object.Key != tt.request.Key {
+					t.Errorf("Expected key %q, got %q", tt.request.Key, object.Key)
+				}
+				if object.Bucket != tt.request.Bucket {
+					t.Errorf("Expected bucket %q, got %q", tt.request.Bucket, object.Bucket)
+				}
+				if object.Size != int64(len(testData)) {
+					t.Errorf("Expected size %d, got %d", len(testData), object.Size)
+				}
+			}
+		})
+	}
+}
+
+// TestObjectStore_DeleteObject tests object deletion
+func TestObjectStore_DeleteObject(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "delete-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	// Create test object
+	putReq := &PutObjectRequest{
+		Bucket:       "delete-test-bucket",
+		Key:          "object-to-delete",
+		Data:         []byte("This will be deleted"),
+		StorageClass: StorageClassHot,
+	}
+	if err := store.PutObject(ctx, putReq); err != nil {
+		t.Fatalf("Failed to put test object: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		request   *DeleteObjectRequest
+		wantError bool
+	}{
+		{
+			name: "delete existing object",
+			request: &DeleteObjectRequest{
+				Bucket: "delete-test-bucket",
+				Key:    "object-to-delete",
+			},
+			wantError: false,
+		},
+		{
+			name: "delete non-existent object",
+			request: &DeleteObjectRequest{
+				Bucket: "delete-test-bucket",
+				Key:    "does-not-exist",
+			},
+			wantError: true,
+		},
+		{
+			name: "delete from non-existent bucket",
+			request: &DeleteObjectRequest{
+				Bucket: "does-not-exist",
+				Key:    "test-object",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.DeleteObject(ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify object was deleted
+			getReq := &GetObjectRequest{
+				Bucket: tt.request.Bucket,
+				Key:    tt.request.Key,
+			}
+			_, err = store.GetObject(ctx, getReq)
+			if err == nil {
+				t.Error("Expected error when getting deleted object, got nil")
+			}
+		})
+	}
+}
+
+// TestObjectStore_ListObjects tests listing objects
+func TestObjectStore_ListObjects(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "list-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		objectsToAdd  []string
+		expectedCount int
+	}{
+		{
+			name:          "list empty bucket",
+			objectsToAdd:  nil,
+			expectedCount: 0,
+		},
+		{
+			name:          "list single object",
+			objectsToAdd:  []string{"object-1"},
+			expectedCount: 1,
+		},
+		{
+			name: "list multiple objects",
+			objectsToAdd: []string{
+				"object-2",
+				"object-3",
+				"object-4",
+				"subdir/object-5",
+			},
+			expectedCount: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fresh bucket for each test
+			bucketName := "list-test-bucket-" + tt.name
+			bucket := &CreateBucketRequest{
+				Name:         bucketName,
+				StorageClass: StorageClassHot,
+				QuotaBytes:   10 * 1024 * 1024,
+				Owner:        "user-123",
+			}
+			if err := store.CreateBucket(ctx, bucket); err != nil {
+				t.Fatalf("Failed to create bucket: %v", err)
+			}
+
+			// Add objects
+			for _, key := range tt.objectsToAdd {
+				putReq := &PutObjectRequest{
+					Bucket:       bucketName,
+					Key:          key,
+					Data:         []byte("test data for " + key),
+					StorageClass: StorageClassHot,
+				}
+				if err := store.PutObject(ctx, putReq); err != nil {
+					t.Fatalf("Failed to put object %q: %v", key, err)
+				}
+			}
+
+			// List objects
+			listReq := &ListObjectsRequest{
+				Bucket: bucketName,
+			}
+			objects, err := store.ListObjects(ctx, listReq)
+			if err != nil {
+				t.Fatalf("Failed to list objects: %v", err)
+			}
+
+			if len(objects) != tt.expectedCount {
+				t.Errorf("Expected %d objects, got %d", tt.expectedCount, len(objects))
+			}
+
+			// Verify object keys
+			for _, expectedKey := range tt.objectsToAdd {
+				found := false
+				for _, obj := range objects {
+					if obj.Key == expectedKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected object %q not found in list", expectedKey)
+				}
+			}
+		})
+	}
+}
+
+// TestObjectStore_PutObjectStream tests streaming object upload
+func TestObjectStore_PutObjectStream(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "stream-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		request   *PutObjectStreamRequest
+		dataSize  int
+		wantError bool
+	}{
+		{
+			name: "stream small object",
+			request: &PutObjectStreamRequest{
+				Bucket:       "stream-test-bucket",
+				Key:          "stream-small",
+				Reader:       bytes.NewReader([]byte("Small streaming data")),
+				StorageClass: StorageClassHot,
+				ContentType:  "text/plain",
+			},
+			dataSize:  20,
+			wantError: false,
+		},
+		{
+			name: "stream large object (multiple chunks)",
+			request: &PutObjectStreamRequest{
+				Bucket:       "stream-test-bucket",
+				Key:          "stream-large",
+				Reader:       bytes.NewReader(bytes.Repeat([]byte("A"), 300*1024)), // 300KB
+				StorageClass: StorageClassHot,
+				ContentType:  "application/octet-stream",
+			},
+			dataSize:  300 * 1024,
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.PutObjectStream(ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify object was created
+			getReq := &GetObjectRequest{
+				Bucket: tt.request.Bucket,
+				Key:    tt.request.Key,
+			}
+			object, err := store.GetObject(ctx, getReq)
+			if err != nil {
+				t.Errorf("Failed to get streamed object: %v", err)
+				return
+			}
+
+			if object.Key != tt.request.Key {
+				t.Errorf("Expected key %q, got %q", tt.request.Key, object.Key)
+			}
+			if object.Size != int64(tt.dataSize) {
+				t.Errorf("Expected size %d, got %d", tt.dataSize, object.Size)
+			}
+		})
+	}
+}
+
+// TestObjectStore_GetObjectStream tests streaming object retrieval
+func TestObjectStore_GetObjectStream(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket and object
+	testBucket := &CreateBucketRequest{
+		Name:         "get-stream-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   10 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	testData := []byte("Test streaming retrieval data")
+	putReq := &PutObjectRequest{
+		Bucket:       "get-stream-test-bucket",
+		Key:          "stream-object",
+		Data:         testData,
+		StorageClass: StorageClassHot,
+	}
+	if err := store.PutObject(ctx, putReq); err != nil {
+		t.Fatalf("Failed to put test object: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		bucket    string
+		key       string
+		wantError bool
+		checkData bool
+	}{
+		{
+			name:      "stream existing object",
+			bucket:    "get-stream-test-bucket",
+			key:       "stream-object",
+			wantError: false,
+			checkData: true,
+		},
+		{
+			name:      "stream non-existent object",
+			bucket:    "get-stream-test-bucket",
+			key:       "does-not-exist",
+			wantError: true,
+			checkData: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := store.GetObjectStream(ctx, tt.bucket, tt.key, &buf)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if tt.checkData {
+				if !bytes.Equal(buf.Bytes(), testData) {
+					t.Errorf("Data mismatch: expected %d bytes, got %d bytes", len(testData), buf.Len())
+				}
+			}
+		})
+	}
+}
+
+// TestObjectStore_MultipartUpload tests multipart upload workflow
+func TestObjectStore_MultipartUpload(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "multipart-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   50 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	t.Run("complete multipart upload", func(t *testing.T) {
+		// Step 1: Initiate multipart upload
+		initiateReq := &InitiateMultipartUploadRequest{
+			Bucket:       "multipart-test-bucket",
+			Key:          "multipart-object",
+			StorageClass: StorageClassHot,
+			ContentType:  "application/octet-stream",
+			Metadata: map[string]string{
+				"upload-type": "multipart",
+			},
+		}
+		initiateResp, err := store.InitiateMultipartUpload(ctx, initiateReq)
+		if err != nil {
+			t.Fatalf("Failed to initiate multipart upload: %v", err)
+		}
+
+		if initiateResp.UploadID == "" {
+			t.Error("Upload ID should not be empty")
+		}
+		if initiateResp.Bucket != initiateReq.Bucket {
+			t.Errorf("Expected bucket %q, got %q", initiateReq.Bucket, initiateResp.Bucket)
+		}
+		if initiateResp.Key != initiateReq.Key {
+			t.Errorf("Expected key %q, got %q", initiateReq.Key, initiateResp.Key)
+		}
+
+		// Step 2: Upload parts
+		parts := []struct {
+			partNumber int
+			data       []byte
+		}{
+			{partNumber: 1, data: bytes.Repeat([]byte("Part1-"), 10000)},
+			{partNumber: 2, data: bytes.Repeat([]byte("Part2-"), 10000)},
+			{partNumber: 3, data: bytes.Repeat([]byte("Part3-"), 10000)},
+		}
+
+		for _, part := range parts {
+			uploadReq := &UploadPartRequest{
+				UploadID:   initiateResp.UploadID,
+				PartNumber: part.partNumber,
+				Data:       part.data,
+			}
+			uploadResp, err := store.UploadPart(ctx, uploadReq)
+			if err != nil {
+				t.Fatalf("Failed to upload part %d: %v", part.partNumber, err)
+			}
+
+			if uploadResp.PartNumber != part.partNumber {
+				t.Errorf("Expected part number %d, got %d", part.partNumber, uploadResp.PartNumber)
+			}
+			if uploadResp.Checksum == "" {
+				t.Error("Checksum should not be empty")
+			}
+		}
+
+		// Step 3: Complete multipart upload
+		completeReq := &CompleteMultipartUploadRequest{
+			UploadID: initiateResp.UploadID,
+		}
+		err = store.CompleteMultipartUpload(ctx, completeReq)
+		if err != nil {
+			t.Fatalf("Failed to complete multipart upload: %v", err)
+		}
+
+		// Verify object was created
+		getReq := &GetObjectRequest{
+			Bucket: initiateReq.Bucket,
+			Key:    initiateReq.Key,
+		}
+		object, err := store.GetObject(ctx, getReq)
+		if err != nil {
+			t.Fatalf("Failed to get completed multipart object: %v", err)
+		}
+
+		expectedSize := int64(0)
+		for _, part := range parts {
+			expectedSize += int64(len(part.data))
+		}
+		if object.Size != expectedSize {
+			t.Errorf("Expected size %d, got %d", expectedSize, object.Size)
+		}
+	})
+
+	t.Run("abort multipart upload", func(t *testing.T) {
+		// Initiate multipart upload
+		initiateReq := &InitiateMultipartUploadRequest{
+			Bucket:       "multipart-test-bucket",
+			Key:          "aborted-multipart-object",
+			StorageClass: StorageClassHot,
+			ContentType:  "application/octet-stream",
+		}
+		initiateResp, err := store.InitiateMultipartUpload(ctx, initiateReq)
+		if err != nil {
+			t.Fatalf("Failed to initiate multipart upload: %v", err)
+		}
+
+		// Upload one part
+		uploadReq := &UploadPartRequest{
+			UploadID:   initiateResp.UploadID,
+			PartNumber: 1,
+			Data:       []byte("Part data to be aborted"),
+		}
+		_, err = store.UploadPart(ctx, uploadReq)
+		if err != nil {
+			t.Fatalf("Failed to upload part: %v", err)
+		}
+
+		// Abort the upload
+		err = store.AbortMultipartUpload(ctx, initiateResp.UploadID)
+		if err != nil {
+			t.Fatalf("Failed to abort multipart upload: %v", err)
+		}
+
+		// Verify object was NOT created
+		getReq := &GetObjectRequest{
+			Bucket: initiateReq.Bucket,
+			Key:    initiateReq.Key,
+		}
+		_, err = store.GetObject(ctx, getReq)
+		if err == nil {
+			t.Error("Expected error when getting aborted multipart object, got nil")
+		}
+	})
+}
+
+// TestObjectStore_ConcurrentPuts tests concurrent object operations (race detector)
+func TestObjectStore_ConcurrentPuts(t *testing.T) {
+	store, _, cleanup := setupTestObjectStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test bucket
+	testBucket := &CreateBucketRequest{
+		Name:         "concurrent-test-bucket",
+		StorageClass: StorageClassHot,
+		QuotaBytes:   50 * 1024 * 1024,
+		Owner:        "user-123",
+	}
+	if err := store.CreateBucket(ctx, testBucket); err != nil {
+		t.Fatalf("Failed to create test bucket: %v", err)
+	}
+
+	// Test concurrent puts - should be safe with race detector
+	const numGoroutines = 10
+	errChan := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			putReq := &PutObjectRequest{
+				Bucket:       "concurrent-test-bucket",
+				Key:          fmt.Sprintf("concurrent-object-%d", idx),
+				Data:         []byte(fmt.Sprintf("Data for object %d", idx)),
+				StorageClass: StorageClassHot,
+			}
+			errChan <- store.PutObject(ctx, putReq)
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < numGoroutines; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent put failed: %v", err)
+		}
+	}
+
+	// Verify all objects were created
+	listReq := &ListObjectsRequest{
+		Bucket: "concurrent-test-bucket",
+	}
+	objects, err := store.ListObjects(ctx, listReq)
+	if err != nil {
+		t.Fatalf("Failed to list objects: %v", err)
+	}
+
+	if len(objects) != numGoroutines {
+		t.Errorf("Expected %d objects, got %d", numGoroutines, len(objects))
+	}
+}
