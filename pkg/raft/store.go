@@ -47,6 +47,7 @@ type Config struct {
 	LocalID        raft.ServerID
 	EnableSingle   bool
 	SnapshotRetain int
+	JoinAddr       string // Address of existing node to join (for multi-node clusters)
 }
 
 // NewStore creates a new Raft-backed store
@@ -82,6 +83,22 @@ func NewStore(config *Config) (*Store, error) {
 	// Initialize Raft
 	if err := s.initRaft(); err != nil {
 		return nil, fmt.Errorf("failed to initialize raft: %w", err)
+	}
+
+	// Auto-join cluster if JoinAddr is specified
+	if config.JoinAddr != "" && !config.Bootstrap {
+		config.Logger.Info("Auto-joining RAFT cluster",
+			zap.String("join_addr", config.JoinAddr),
+			zap.String("node_id", config.RaftID))
+
+		// Give bootstrap node time to stabilize
+		time.Sleep(1 * time.Second)
+
+		// Note: In real multi-node setups, the join should be initiated by
+		// calling an HTTP API on the leader node, which then calls Join()
+		// For testing purposes, we'll log this requirement
+		config.Logger.Warn("JoinAddr specified but auto-join not implemented",
+			zap.String("hint", "Call store.Join() from leader node"))
 	}
 
 	return s, nil
@@ -436,6 +453,16 @@ func (s *Store) Close() error {
 
 	s.logger.Info("Raft store shutdown complete")
 	return nil
+}
+
+// GetConfig returns the store's configuration
+func (s *Store) GetConfig() *Config {
+	return s.config
+}
+
+// GetRaftAddr returns the RAFT bind address
+func (s *Store) GetRaftAddr() string {
+	return s.config.RaftBind
 }
 
 // ApplyBatch applies multiple commands in a single Raft log entry

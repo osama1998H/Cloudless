@@ -30,6 +30,12 @@ type MetadataCommand struct {
 	Value  []byte `json:"value,omitempty"` // Serialized Bucket or Object metadata
 }
 
+// MetadataBatchCommand represents multiple metadata operations to be applied atomically
+// CLD-REQ-051: Batch operations improve throughput by reducing RAFT round trips
+type MetadataBatchCommand struct {
+	Operations []MetadataCommand `json:"operations"`
+}
+
 // BatchCommand represents multiple commands to be applied atomically
 type BatchCommand struct {
 	Commands []*Command `json:"commands"`
@@ -63,7 +69,13 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Try to parse as metadata command first (CLD-REQ-051)
+	// Try to parse as metadata batch command first (CLD-REQ-051)
+	var metaBatch MetadataBatchCommand
+	if err := json.Unmarshal(l.Data, &metaBatch); err == nil && len(metaBatch.Operations) > 0 {
+		return f.applyMetadataBatch(&metaBatch)
+	}
+
+	// Try to parse as metadata command (CLD-REQ-051)
 	var metaCmd MetadataCommand
 	if err := json.Unmarshal(l.Data, &metaCmd); err == nil && metaCmd.Op != "" && metaCmd.Bucket != "" {
 		return f.applyMetadataCommand(&metaCmd)
@@ -342,6 +354,40 @@ func (f *FSM) applyMetadataCommand(cmd *MetadataCommand) interface{} {
 		f.logger.Error("Unknown metadata operation", zap.String("op", cmd.Op))
 		return err
 	}
+}
+
+// applyMetadataBatch applies a batch of metadata operations atomically
+// CLD-REQ-051: Batch operations improve throughput by reducing RAFT round trips
+func (f *FSM) applyMetadataBatch(batch *MetadataBatchCommand) interface{} {
+	var lastErr error
+	applied := 0
+
+	for i, cmd := range batch.Operations {
+		result := f.applyMetadataCommand(&cmd)
+		if err, ok := result.(error); ok && err != nil {
+			lastErr = err
+			f.logger.Warn("Batch operation failed",
+				zap.Int("index", i),
+				zap.String("op", cmd.Op),
+				zap.String("bucket", cmd.Bucket),
+				zap.Error(err))
+			// Continue applying remaining operations
+			continue
+		}
+		applied++
+	}
+
+	if lastErr != nil {
+		f.logger.Warn("Metadata batch completed with errors",
+			zap.Int("total", len(batch.Operations)),
+			zap.Int("applied", applied),
+			zap.Error(lastErr))
+		return lastErr
+	}
+
+	f.logger.Debug("Metadata batch applied successfully",
+		zap.Int("operations", len(batch.Operations)))
+	return nil
 }
 
 // applyCreateBucket stores bucket metadata

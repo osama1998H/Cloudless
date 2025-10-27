@@ -1,0 +1,505 @@
+{
+  "dashboard": {
+    "title": "RAFT Consensus Health (CLD-REQ-051)",
+    "uid": "cloudless-raft-health",
+    "tags": ["cloudless", "raft", "consensus", "metadata"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "RAFT Node State",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_raft_node_state",
+            "legendFormat": "{{node_id}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "orientation": "auto",
+          "textMode": "value_and_name"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "0", "text": "Follower"},
+              {"type": "value", "value": "1", "text": "Candidate"},
+              {"type": "value", "value": "2", "text": "Leader"},
+              {"type": "value", "value": "3", "text": "Shutdown"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "blue"},
+                {"value": 1, "color": "yellow"},
+                {"value": 2, "color": "green"},
+                {"value": 3, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Leader Elections",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "increase(cloudless_coordinator_leader_elections_total[1h])",
+            "legendFormat": "{{result}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 5, "color": "yellow"},
+                {"value": 20, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Commit vs Applied Index",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_raft_commit_index",
+            "legendFormat": "Commit Index",
+            "refId": "A"
+          },
+          {
+            "expr": "cloudless_coordinator_raft_applied_index",
+            "legendFormat": "Applied Index",
+            "refId": "B"
+          },
+          {
+            "expr": "cloudless_raft_last_log_index",
+            "legendFormat": "Last Log Index",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "showPoints": "never"
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "RAFT Apply Latency",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(cloudless_raft_apply_latency_seconds_bucket[5m]))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(cloudless_raft_apply_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(cloudless_raft_apply_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "RAFT Commit Latency",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(cloudless_raft_commit_latency_seconds_bucket[5m]))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(cloudless_raft_commit_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(cloudless_raft_commit_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Metadata Operations (CLD-REQ-051)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "rate(cloudless_metadata_operations_total{result=\"success\"}[5m])",
+            "legendFormat": "{{operation}} (success)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(cloudless_metadata_operations_total{result=\"failure\"}[5m])",
+            "legendFormat": "{{operation}} (failure)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "stacking": {"mode": "normal"}
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byRegexp", "options": ".*failure.*"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Metadata Operation Latency",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(cloudless_metadata_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50 - {{operation}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(cloudless_metadata_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 - {{operation}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "RAFT Apply Errors",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "rate(cloudless_metadata_raft_apply_errors_total[5m])",
+            "legendFormat": "{{operation}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byRegexp", "options": ".*not_leader.*"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}
+              ]
+            },
+            {
+              "matcher": {"id": "byRegexp", "options": ".*timeout.*"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 9,
+        "title": "Follower Replication Lag",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "cloudless_raft_follower_replication_lag_entries",
+            "legendFormat": "{{follower_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 100, "color": "yellow"},
+                {"value": 1000, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Snapshot Operations",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 22, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(increase(cloudless_raft_snapshot_creation_total[1h]))",
+            "legendFormat": "Creates",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(increase(cloudless_raft_snapshot_restore_total[1h]))",
+            "legendFormat": "Restores",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"}
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Snapshot Size",
+        "type": "gauge",
+        "gridPos": {"x": 6, "y": 22, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_raft_snapshot_size_bytes",
+            "legendFormat": "Size",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bytes",
+            "min": 0,
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10485760, "color": "yellow"},
+                {"value": 104857600, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 12,
+        "title": "Snapshot Duration",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 22, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(cloudless_raft_snapshot_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 - {{operation}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Metadata Buckets Total",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 26, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_metadata_buckets_total",
+            "legendFormat": "Total Buckets",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "Objects per Bucket",
+        "type": "timeseries",
+        "gridPos": {"x": 6, "y": 26, "w": 18, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_metadata_objects_per_bucket",
+            "legendFormat": "{{bucket}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "RAFT Peer Connections",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 30, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "cloudless_raft_peer_connections",
+            "legendFormat": "{{peer_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            },
+            "mappings": [
+              {"type": "value", "value": "0", "text": "Disconnected"},
+              {"type": "value", "value": "1", "text": "Connected"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 16,
+        "title": "Heartbeat Failures",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 30, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "rate(cloudless_raft_heartbeat_failures_total[5m])",
+            "legendFormat": "{{peer_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "min": 0,
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 0.1, "color": "yellow"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "schemaVersion": 36,
+    "version": 1,
+    "editable": true
+  },
+  "overwrite": true
+}

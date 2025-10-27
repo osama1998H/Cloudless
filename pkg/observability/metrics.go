@@ -380,6 +380,173 @@ var (
 	)
 )
 
+// RAFT Consensus Metrics (CLD-REQ-051: Strong consistency via RAFT)
+var (
+	// RAFT state tracking
+	RaftNodeState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_node_state",
+			Help: "RAFT node state (0=follower, 1=candidate, 2=leader)",
+		},
+		[]string{"node_id"},
+	)
+
+	RaftCommitIndex = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_commit_index",
+			Help: "Last committed RAFT log index",
+		},
+	)
+
+	RaftLastLogIndex = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_last_log_index",
+			Help: "Index of the last RAFT log entry",
+		},
+	)
+
+	RaftLastLogTerm = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_last_log_term",
+			Help: "Term of the last RAFT log entry",
+		},
+	)
+
+	RaftApplyLatencySeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_raft_apply_latency_seconds",
+			Help:    "Latency of applying RAFT log entries to FSM",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0},
+		},
+	)
+
+	RaftCommitLatencySeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_raft_commit_latency_seconds",
+			Help:    "Latency from log append to commit (consensus latency)",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0},
+		},
+	)
+
+	// Leader-specific metrics
+	RaftLeaderLastContact = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_leader_last_contact_seconds",
+			Help: "Seconds since leader last heard from each follower",
+		},
+		[]string{"follower_id"},
+	)
+
+	RaftFollowerReplicationLag = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_follower_replication_lag_entries",
+			Help: "Number of log entries by which a follower is behind the leader",
+		},
+		[]string{"follower_id"},
+	)
+
+	// Snapshot metrics
+	RaftSnapshotCreationTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_raft_snapshot_creation_total",
+			Help: "Total number of RAFT snapshot creation operations",
+		},
+		[]string{"result"}, // success, failure
+	)
+
+	RaftSnapshotRestoreTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_raft_snapshot_restore_total",
+			Help: "Total number of RAFT snapshot restore operations",
+		},
+		[]string{"result"}, // success, failure
+	)
+
+	RaftSnapshotDurationSeconds = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_raft_snapshot_duration_seconds",
+			Help:    "Duration of RAFT snapshot operations",
+			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0},
+		},
+		[]string{"operation"}, // create, restore
+	)
+
+	RaftSnapshotSizeBytes = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_snapshot_size_bytes",
+			Help: "Size of the last RAFT snapshot in bytes",
+		},
+	)
+
+	// Peer connectivity
+	RaftPeerConnections = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_raft_peer_connections",
+			Help: "Number of active connections to RAFT peers (1=connected, 0=disconnected)",
+		},
+		[]string{"peer_id"},
+	)
+
+	RaftHeartbeatFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_raft_heartbeat_failures_total",
+			Help: "Total number of failed heartbeats to RAFT peers",
+		},
+		[]string{"peer_id"},
+	)
+)
+
+// Metadata Store Metrics (CLD-REQ-051: RAFT-backed metadata)
+var (
+	MetadataOperationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_metadata_operations_total",
+			Help: "Total number of metadata operations (CLD-REQ-051: RAFT-backed)",
+		},
+		[]string{"operation", "result"}, // operation: create_bucket/delete_bucket/put_object/delete_object, result: success/failure
+	)
+
+	MetadataOperationDurationSeconds = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cloudless_metadata_operation_duration_seconds",
+			Help:    "Duration of metadata operations including RAFT consensus (CLD-REQ-051)",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0},
+		},
+		[]string{"operation"},
+	)
+
+	MetadataRaftApplyErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cloudless_metadata_raft_apply_errors_total",
+			Help: "Total number of errors applying metadata operations to RAFT",
+		},
+		[]string{"operation", "error_type"}, // error_type: not_leader/timeout/apply_failed
+	)
+
+	MetadataBucketsTotal = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cloudless_metadata_buckets_total",
+			Help: "Total number of buckets in metadata store",
+		},
+	)
+
+	MetadataObjectsPerBucket = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_metadata_objects_per_bucket",
+			Help: "Number of objects per bucket in metadata store",
+		},
+		[]string{"bucket"},
+	)
+
+	MetadataCacheHitRate = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cloudless_metadata_cache_hit_rate",
+			Help: "Cache hit rate for metadata lookups (0-1)",
+		},
+		[]string{"operation"}, // get_bucket, get_object
+	)
+)
+
 // Service Registry Metrics
 var (
 	// Service operations

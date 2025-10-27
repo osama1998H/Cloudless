@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"go.uber.org/zap"
 )
@@ -102,11 +103,20 @@ func (ms *MetadataStore) initializeFromRAFT() {
 // CreateBucket creates a new bucket with RAFT consensus
 // CLD-REQ-051: Strong consistency via RAFT
 func (ms *MetadataStore) CreateBucket(bucket *Bucket) error {
+	// Track metrics
+	start := time.Now()
+	operation := "create_bucket"
+	defer func() {
+		duration := time.Since(start)
+		observability.MetadataOperationDurationSeconds.WithLabelValues(operation).Observe(duration.Seconds())
+	}()
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	// Check if bucket already exists (read from cache)
 	if _, exists := ms.buckets.Load(bucket.Name); exists {
+		observability.MetadataOperationsTotal.WithLabelValues(operation, "failure").Inc()
 		return fmt.Errorf("bucket already exists: %s", bucket.Name)
 	}
 
@@ -123,6 +133,7 @@ func (ms *MetadataStore) CreateBucket(bucket *Bucket) error {
 	// Serialize bucket metadata
 	value, err := json.Marshal(bucket)
 	if err != nil {
+		observability.MetadataOperationsTotal.WithLabelValues(operation, "failure").Inc()
 		return fmt.Errorf("failed to serialize bucket: %w", err)
 	}
 
@@ -136,17 +147,26 @@ func (ms *MetadataStore) CreateBucket(bucket *Bucket) error {
 	// Apply to RAFT (ensures strong consistency)
 	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
+		observability.MetadataOperationsTotal.WithLabelValues(operation, "failure").Inc()
 		return fmt.Errorf("failed to marshal metadata command: %w", err)
 	}
 
 	// IMPORTANT: This blocks until RAFT consensus is reached
 	// Guarantees strong consistency across all coordinator replicas
 	if err := ms.applyRAFTCommand(cmdBytes); err != nil {
+		observability.MetadataOperationsTotal.WithLabelValues(operation, "failure").Inc()
+		ms.recordRAFTApplyError(operation, err)
 		return fmt.Errorf("failed to apply bucket creation to RAFT: %w", err)
 	}
 
 	// Update local cache (RAFT has committed)
 	ms.buckets.Store(bucket.Name, bucket)
+
+	// Update bucket count metric
+	ms.updateBucketCountMetric()
+
+	// Record success
+	observability.MetadataOperationsTotal.WithLabelValues(operation, "success").Inc()
 
 	ms.logger.Info("Created bucket via RAFT",
 		zap.String("bucket", bucket.Name),
@@ -172,10 +192,14 @@ func (ms *MetadataStore) applyRAFTCommand(cmdBytes []byte) error {
 	// Check if this node is the RAFT leader
 	if !ms.raftStore.IsLeader() {
 		leaderAddr := ms.raftStore.GetLeader()
-		if leaderAddr == "" {
-			return fmt.Errorf("no RAFT leader available")
+		nodeID := ms.raftStore.GetConfig().RaftID
+
+		// Return structured NotLeaderError for client redirect
+		return &NotLeaderError{
+			LeaderAddr: leaderAddr,
+			NodeID:     nodeID,
+			Operation:  "metadata_write",
 		}
-		return fmt.Errorf("not RAFT leader, redirect to: %s", leaderAddr)
 	}
 
 	// Apply command to RAFT log
@@ -186,14 +210,49 @@ func (ms *MetadataStore) applyRAFTCommand(cmdBytes []byte) error {
 	return ms.raftStore.ApplyRaw(cmdBytes)
 }
 
-// GetBucket retrieves a bucket by name
+// GetBucket retrieves a bucket by name with strong consistency
 func (ms *MetadataStore) GetBucket(name string) (*Bucket, error) {
-	if b, ok := ms.buckets.Load(name); ok {
-		bucket := b.(*Bucket)
-		return bucket, nil
+	return ms.GetBucketWithOptions(name, DefaultReadOptions())
+}
+
+// GetBucketWithOptions retrieves a bucket with specified consistency level
+// CLD-REQ-051: Supports eventual consistency reads from followers
+func (ms *MetadataStore) GetBucketWithOptions(name string, opts ReadOptions) (*Bucket, error) {
+	// For strong consistency, ensure we're reading from leader
+	if opts.Consistency == ReadConsistencyStrong && ms.raftStore != nil {
+		if !ms.raftStore.IsLeader() {
+			leaderAddr := ms.raftStore.GetLeader()
+			nodeID := ms.raftStore.GetConfig().RaftID
+			return nil, &NotLeaderError{
+				LeaderAddr: leaderAddr,
+				NodeID:     nodeID,
+				Operation:  "get_bucket",
+			}
+		}
 	}
 
-	return nil, fmt.Errorf("bucket not found: %s", name)
+	// Read from local cache (works on both leader and followers)
+	b, ok := ms.buckets.Load(name)
+	if !ok {
+		return nil, &NotFoundError{Resource: fmt.Sprintf("bucket:%s", name)}
+	}
+
+	bucket := b.(*Bucket)
+
+	// Check staleness for bounded consistency
+	if opts.Consistency == ReadConsistencyBounded {
+		staleness := time.Since(bucket.UpdatedAt)
+		if staleness > opts.MaxStaleness {
+			return nil, &StaleReadError{
+				MaxStaleness:     opts.MaxStaleness,
+				ActualStaleness:  staleness,
+				LastModified:     bucket.UpdatedAt,
+				ConsistencyLevel: "bounded",
+			}
+		}
+	}
+
+	return bucket, nil
 }
 
 // UpdateBucket updates bucket metadata
@@ -391,21 +450,54 @@ func (ms *MetadataStore) PutObject(object *Object) error {
 	return nil
 }
 
-// GetObject retrieves object metadata
+// GetObject retrieves object metadata with default (strong) consistency
 func (ms *MetadataStore) GetObject(bucket, key string) (*Object, error) {
-	objectKey := ms.getObjectKey(bucket, key)
+	return ms.GetObjectWithOptions(bucket, key, DefaultReadOptions())
+}
 
-	if o, ok := ms.objects.Load(objectKey); ok {
-		object := o.(*Object)
-
-		// Update access time
-		object.AccessedAt = time.Now()
-		ms.objects.Store(objectKey, object)
-
-		return object, nil
+// GetObjectWithOptions retrieves object metadata with specified consistency level
+// CLD-REQ-051: Support for different consistency levels (strong, eventual, bounded)
+func (ms *MetadataStore) GetObjectWithOptions(bucket, key string, opts ReadOptions) (*Object, error) {
+	// For strong consistency, ensure we're reading from leader
+	if opts.Consistency == ReadConsistencyStrong && ms.raftStore != nil {
+		if !ms.raftStore.IsLeader() {
+			leaderAddr := ms.raftStore.GetLeader()
+			nodeID := ms.raftStore.GetConfig().RaftID
+			return nil, &NotLeaderError{
+				LeaderAddr: leaderAddr,
+				NodeID:     nodeID,
+				Operation:  "get_object",
+			}
+		}
 	}
 
-	return nil, fmt.Errorf("object not found: %s/%s", bucket, key)
+	// Read from local cache (works on both leader and followers)
+	objectKey := ms.getObjectKey(bucket, key)
+	o, ok := ms.objects.Load(objectKey)
+	if !ok {
+		return nil, &NotFoundError{Resource: fmt.Sprintf("object:%s/%s", bucket, key)}
+	}
+
+	object := o.(*Object)
+
+	// Check staleness for bounded consistency
+	if opts.Consistency == ReadConsistencyBounded {
+		staleness := time.Since(object.UpdatedAt)
+		if staleness > opts.MaxStaleness {
+			return nil, &StaleReadError{
+				MaxStaleness:     opts.MaxStaleness,
+				ActualStaleness:  staleness,
+				LastModified:     object.UpdatedAt,
+				ConsistencyLevel: "bounded",
+			}
+		}
+	}
+
+	// Update access time (even for eventual/bounded reads)
+	object.AccessedAt = time.Now()
+	ms.objects.Store(objectKey, object)
+
+	return object, nil
 }
 
 // DeleteObject deletes object metadata with RAFT consensus
@@ -460,14 +552,35 @@ func (ms *MetadataStore) DeleteObject(bucket, key string) error {
 }
 
 // ListObjects lists objects in a bucket with pagination
+// ListObjects lists object metadata with default (strong) consistency
 func (ms *MetadataStore) ListObjects(bucket, prefix string, maxKeys int) ([]*ObjectMetadata, error) {
-	// Verify bucket exists
-	if _, err := ms.GetBucket(bucket); err != nil {
+	return ms.ListObjectsWithOptions(bucket, prefix, maxKeys, DefaultReadOptions())
+}
+
+// ListObjectsWithOptions lists object metadata with specified consistency level
+// CLD-REQ-051: Support for different consistency levels (strong, eventual, bounded)
+func (ms *MetadataStore) ListObjectsWithOptions(bucket, prefix string, maxKeys int, opts ReadOptions) ([]*ObjectMetadata, error) {
+	// For strong consistency, ensure we're reading from leader
+	if opts.Consistency == ReadConsistencyStrong && ms.raftStore != nil {
+		if !ms.raftStore.IsLeader() {
+			leaderAddr := ms.raftStore.GetLeader()
+			nodeID := ms.raftStore.GetConfig().RaftID
+			return nil, &NotLeaderError{
+				LeaderAddr: leaderAddr,
+				NodeID:     nodeID,
+				Operation:  "list_objects",
+			}
+		}
+	}
+
+	// Verify bucket exists (using same consistency level)
+	if _, err := ms.GetBucketWithOptions(bucket, opts); err != nil {
 		return nil, err
 	}
 
 	var objects []*ObjectMetadata
 	count := 0
+	now := time.Now()
 
 	ms.objects.Range(func(key, value interface{}) bool {
 		obj := value.(*Object)
@@ -483,6 +596,14 @@ func (ms *MetadataStore) ListObjects(bucket, prefix string, maxKeys int) ([]*Obj
 
 		if prefix != "" && obj.Key[:len(prefix)] != prefix {
 			return true
+		}
+
+		// For bounded consistency, skip stale objects
+		if opts.Consistency == ReadConsistencyBounded {
+			staleness := now.Sub(obj.UpdatedAt)
+			if staleness > opts.MaxStaleness {
+				return true // Skip stale object
+			}
 		}
 
 		// Create metadata
@@ -635,4 +756,46 @@ func (ms *MetadataStore) DeserializeMetadata(serialized []byte) error {
 	)
 
 	return nil
+}
+
+// Metrics Helper Methods (CLD-REQ-051: RAFT observability)
+
+// recordRAFTApplyError records specific error types when RAFT apply fails
+func (ms *MetadataStore) recordRAFTApplyError(operation string, err error) {
+	errorType := "apply_failed"
+
+	// Classify error type for better diagnostics
+	errStr := err.Error()
+	if strings.Contains(errStr, "not RAFT leader") || strings.Contains(errStr, "not leader") {
+		errorType = "not_leader"
+	} else if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline") {
+		errorType = "timeout"
+	}
+
+	observability.MetadataRaftApplyErrors.WithLabelValues(operation, errorType).Inc()
+}
+
+// updateBucketCountMetric updates the total bucket count metric
+func (ms *MetadataStore) updateBucketCountMetric() {
+	count := 0
+	ms.buckets.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	observability.MetadataBucketsTotal.Set(float64(count))
+}
+
+// updateObjectCountMetric updates the per-bucket object count metric
+func (ms *MetadataStore) updateObjectCountMetric(bucketName string) {
+	count := 0
+	prefix := bucketName + ":"
+
+	ms.objects.Range(func(key, value interface{}) bool {
+		if strings.HasPrefix(key.(string), prefix) {
+			count++
+		}
+		return true
+	})
+
+	observability.MetadataObjectsPerBucket.WithLabelValues(bucketName).Set(float64(count))
 }
