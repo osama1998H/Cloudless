@@ -1,0 +1,134 @@
+policy_module(cloudless, 1.0.0)
+
+########################################
+#
+# Cloudless Container Domain
+#
+# This policy provides security for Cloudless-managed containers
+# It is designed to work with both MCS (Multi-Category Security)
+# and MLS (Multi-Level Security) environments.
+#
+
+########################################
+# Type Declarations
+########################################
+
+# cloudless_container_t - Main type for Cloudless containers
+type cloudless_container_t;
+domain_type(cloudless_container_t)
+
+# File types for Cloudless
+type cloudless_file_t;
+files_type(cloudless_file_t)
+
+type cloudless_tmp_t;
+files_tmp_file(cloudless_tmp_t)
+
+type cloudless_var_run_t;
+files_pid_file(cloudless_var_run_t)
+
+type cloudless_log_t;
+logging_log_file(cloudless_log_t)
+
+########################################
+# Cloudless Container Domain Policy
+########################################
+
+# Allow basic domain operations
+allow cloudless_container_t self:process { fork signal_perms setpgid getsched setsched setcap setrlimit };
+allow cloudless_container_t self:capability { chown dac_override fowner fsetid kill setgid setuid setpcap net_bind_service net_raw sys_chroot audit_write };
+allow cloudless_container_t self:capability2 { block_suspend };
+
+# File operations
+allow cloudless_container_t cloudless_file_t:dir manage_dir_perms;
+allow cloudless_container_t cloudless_file_t:file manage_file_perms;
+allow cloudless_container_t cloudless_file_t:lnk_file manage_lnk_file_perms;
+
+# Temporary files
+allow cloudless_container_t cloudless_tmp_t:dir manage_dir_perms;
+allow cloudless_container_t cloudless_tmp_t:file manage_file_perms;
+files_tmp_filetrans(cloudless_container_t, cloudless_tmp_t, { file dir })
+
+# PID files
+allow cloudless_container_t cloudless_var_run_t:dir manage_dir_perms;
+allow cloudless_container_t cloudless_var_run_t:file manage_file_perms;
+files_pid_filetrans(cloudless_container_t, cloudless_var_run_t, { file dir })
+
+# Logging
+allow cloudless_container_t cloudless_log_t:dir manage_dir_perms;
+allow cloudless_container_t cloudless_log_t:file { create_file_perms append_file_perms };
+logging_log_filetrans(cloudless_container_t, cloudless_log_t, file)
+
+# Networking
+allow cloudless_container_t self:tcp_socket create_stream_socket_perms;
+allow cloudless_container_t self:udp_socket create_socket_perms;
+allow cloudless_container_t self:unix_stream_socket create_stream_socket_perms;
+allow cloudless_container_t self:unix_dgram_socket create_socket_perms;
+corenet_tcp_sendrecv_generic_if(cloudless_container_t)
+corenet_udp_sendrecv_generic_if(cloudless_container_t)
+corenet_tcp_sendrecv_generic_node(cloudless_container_t)
+corenet_udp_sendrecv_generic_node(cloudless_container_t)
+corenet_tcp_connect_all_ports(cloudless_container_t)
+corenet_tcp_bind_generic_node(cloudless_container_t)
+corenet_udp_bind_generic_node(cloudless_container_t)
+
+# Allow containers to read system state
+kernel_read_system_state(cloudless_container_t)
+kernel_read_network_state(cloudless_container_t)
+
+# Allow containers to execute programs
+corecmd_exec_bin(cloudless_container_t)
+corecmd_exec_shell(cloudless_container_t)
+
+# Allow containers to read lib files
+libs_use_ld_so(cloudless_container_t)
+libs_use_shared_libs(cloudless_container_t)
+
+# Terminal and console access (for interactive containers)
+term_use_all_ptys(cloudless_container_t)
+term_use_console(cloudless_container_t)
+
+# Allow reading /proc and /sys
+dev_read_sysfs(cloudless_container_t)
+fs_read_cgroup_files(cloudless_container_t)
+
+# Deny dangerous operations
+# Containers should not be able to load kernel modules
+kernel_dontaudit_request_load_module(cloudless_container_t)
+
+# Containers should not be able to set system time
+kernel_dontaudit_settime(cloudless_container_t)
+
+# Don't audit attempts to access /proc/kcore, /dev/mem, etc.
+dev_dontaudit_read_kmsg(cloudless_container_t)
+dev_dontaudit_write_kmsg(cloudless_container_t)
+
+########################################
+# MCS/MLS Support
+########################################
+
+# Enable MCS (Multi-Category Security) separation between containers
+# Each container instance should run with a unique MCS label (s0:c0,c1 etc.)
+# to prevent containers from interfering with each other
+
+# Allow containers to only access files with matching categories
+mcs_constrained(cloudless_container_t)
+
+########################################
+# Optional Policy
+########################################
+
+# Allow containers to use systemd (if needed)
+optional_policy(`
+	systemd_use_logind(cloudless_container_t)
+')
+
+# Allow containers to use dbus (if needed)
+optional_policy(`
+	dbus_system_bus_client(cloudless_container_t)
+')
+
+# Allow containers to read container_file_t (for shared volumes)
+optional_policy(`
+	container_read_share_files(cloudless_container_t)
+')

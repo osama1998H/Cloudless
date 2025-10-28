@@ -1,0 +1,343 @@
+# Security Policy Configuration Examples
+# Demonstrates how to use the policy engine to enforce security requirements
+# as per CLD-REQ-062 (Sandboxing and Least Privilege)
+
+---
+# Baseline Security Policy - Enforce minimum security requirements
+policy:
+  name: baseline-security
+  namespace: "*"  # Applies to all namespaces
+  description: "Baseline security requirements for all workloads"
+  enabled: true
+  priority: 100
+  action: Deny    # Deny workloads that violate these rules
+
+  rules:
+    # Require security context to be specified
+    - name: require-security-context
+      type: SecurityContext
+      config:
+        require_security_context: true
+        forbid_privileged: true
+        require_non_root: true
+
+    # Require seccomp profile
+    - name: require-seccomp
+      type: SeccompProfile
+      config:
+        require_seccomp: true
+        forbid_unconfined: true
+        allowed_types:
+          - RuntimeDefault
+          - Localhost
+
+    # Require AppArmor (if available)
+    - name: require-apparmor
+      type: AppArmorProfile
+      config:
+        require_apparmor: false  # Optional, not all systems have AppArmor
+        forbid_unconfined: true
+        allowed_types:
+          - RuntimeDefault
+          - Localhost
+
+---
+# Production Security Policy - Strict requirements for production workloads
+policy:
+  name: production-security
+  namespace: "production"
+  description: "Strict security requirements for production workloads"
+  enabled: true
+  priority: 200  # Higher priority than baseline
+  action: Deny
+
+  rules:
+    # Comprehensive security context requirements
+    - name: strict-security-context
+      type: SecurityContext
+      config:
+        require_security_context: true
+        forbid_privileged: true
+        require_non_root: true
+        require_read_only_root: true
+
+    # Seccomp with strict profile
+    - name: strict-seccomp
+      type: SeccompProfile
+      config:
+        require_seccomp: true
+        forbid_unconfined: true
+        allowed_types:
+          - RuntimeDefault
+          - Localhost
+
+    # AppArmor enforcement
+    - name: enforce-apparmor
+      type: AppArmorProfile
+      config:
+        require_apparmor: true
+        forbid_unconfined: true
+        allowed_types:
+          - RuntimeDefault
+          - Localhost
+
+    # SELinux enforcement (for RHEL/CentOS hosts)
+    - name: enforce-selinux
+      type: SELinuxOptions
+      config:
+        require_selinux: true
+        allowed_types:
+          - cloudless_container_t
+          - cloudless_secure_t
+
+    # Require sandboxed runtime for production
+    - name: require-sandboxed-runtime
+      type: RuntimeClass
+      config:
+        require_sandboxed: true
+        allowed_runtime_classes:
+          - gvisor
+          - kata
+          - firecracker
+
+    # Enforce non-root execution
+    - name: enforce-non-root
+      type: RunAsNonRoot
+      config:
+        enforce: true
+
+    # Enforce read-only root filesystem
+    - name: enforce-read-only-root
+      type: ReadOnlyRootFS
+      config:
+        enforce: true
+
+---
+# Development Security Policy - Relaxed for development workloads
+policy:
+  name: development-security
+  namespace: "development"
+  description: "Relaxed security for development and testing"
+  enabled: true
+  priority: 50
+  action: Deny
+
+  rules:
+    # Basic security context
+    - name: basic-security-context
+      type: SecurityContext
+      config:
+        require_security_context: true
+        forbid_privileged: true  # Still no privileged in dev
+        require_non_root: true
+
+    # Basic seccomp
+    - name: basic-seccomp
+      type: SeccompProfile
+      config:
+        require_seccomp: true
+        forbid_unconfined: true
+
+    # Allow default runc runtime in development
+    - name: allow-runc
+      type: RuntimeClass
+      config:
+        require_runtime_class: false
+        allowed_runtime_classes:
+          - runc
+          - gvisor
+
+    # Non-root required even in dev
+    - name: require-non-root
+      type: RunAsNonRoot
+      config:
+        enforce: true
+
+    # Read-only root optional in dev (for easier debugging)
+    - name: suggest-read-only-root
+      type: ReadOnlyRootFS
+      config:
+        enforce: false
+        exceptions:
+          - debug-container
+          - test-workload
+
+---
+# Sensitive Data Policy - Maximum security for data processing
+policy:
+  name: sensitive-data-policy
+  namespace: "secure-zone"
+  description: "Maximum security for workloads processing sensitive data"
+  enabled: true
+  priority: 300  # Highest priority
+  action: Deny
+
+  rules:
+    # Comprehensive security context
+    - name: maximum-security-context
+      type: SecurityContext
+      config:
+        require_security_context: true
+        forbid_privileged: true
+        require_non_root: true
+        require_read_only_root: true
+
+    # Strict seccomp profile required
+    - name: strict-seccomp-profile
+      type: SeccompProfile
+      config:
+        require_seccomp: true
+        forbid_unconfined: true
+        allowed_types:
+          - Localhost  # Only custom strict profiles allowed
+
+    # AppArmor strict profile
+    - name: strict-apparmor-profile
+      type: AppArmorProfile
+      config:
+        require_apparmor: true
+        forbid_unconfined: true
+        allowed_types:
+          - Localhost  # Only custom profiles
+
+    # SELinux with specific secure type
+    - name: strict-selinux
+      type: SELinuxOptions
+      config:
+        require_selinux: true
+        allowed_types:
+          - cloudless_secure_t  # Only the most secure type
+
+    # VM-level isolation required
+    - name: vm-isolation-required
+      type: RuntimeClass
+      config:
+        require_sandboxed: true
+        allowed_runtime_classes:
+          - kata           # VM-based only
+          - firecracker    # microVM-based only
+
+    # Strict user enforcement
+    - name: strict-user-enforcement
+      type: RunAsNonRoot
+      config:
+        enforce: true
+
+    # Immutable root filesystem required
+    - name: immutable-root-required
+      type: ReadOnlyRootFS
+      config:
+        enforce: true
+        exceptions: []  # No exceptions for sensitive data workloads
+
+  # Apply only to workloads with sensitive data labels
+  conditions:
+    - field: labels.data-classification
+      operator: In
+      value:
+        - confidential
+        - secret
+        - pci-dss
+
+---
+# Audit Policy - Log security-related events without blocking
+policy:
+  name: security-audit
+  namespace: "*"
+  description: "Audit security-related configurations without blocking"
+  enabled: true
+  priority: 10
+  action: Audit  # Log but don't block
+
+  rules:
+    # Audit privileged attempts
+    - name: audit-privileged
+      type: SecurityContext
+      config:
+        forbid_privileged: true
+
+    # Audit unconfined seccomp
+    - name: audit-unconfined-seccomp
+      type: SeccompProfile
+      config:
+        forbid_unconfined: true
+
+    # Audit runc usage in production
+    - name: audit-runc-usage
+      type: RuntimeClass
+      config:
+        forbidden_classes:
+          - runc
+
+  conditions:
+    - field: namespace
+      operator: Equal
+      value: production
+
+---
+# PCI-DSS Compliance Policy - Enforce PCI-DSS requirements
+policy:
+  name: pci-dss-compliance
+  namespace: "*"
+  description: "Enforce PCI-DSS security requirements"
+  enabled: true
+  priority: 250
+  action: Deny
+
+  rules:
+    # PCI-DSS requires strong isolation
+    - name: pci-isolation
+      type: SecurityContext
+      config:
+        require_security_context: true
+        forbid_privileged: true
+        require_non_root: true
+        require_read_only_root: true
+
+    # Syscall filtering required
+    - name: pci-seccomp
+      type: SeccompProfile
+      config:
+        require_seccomp: true
+        forbid_unconfined: true
+
+    # SELinux or AppArmor required
+    - name: pci-mac
+      type: AppArmorProfile
+      config:
+        require_apparmor: true
+        forbid_unconfined: true
+
+    # VM isolation for cardholder data
+    - name: pci-vm-isolation
+      type: RuntimeClass
+      config:
+        require_sandboxed: true
+
+  # Apply only to PCI-DSS labeled workloads
+  conditions:
+    - field: labels.compliance
+      operator: Equal
+      value: pci-dss
+
+  labels:
+    compliance: pci-dss
+    security-framework: payment-card-industry
+
+---
+# Allow Policy - Explicitly allow certain workloads
+policy:
+  name: allow-system-workloads
+  namespace: "kube-system"
+  description: "Explicitly allow system workloads with special requirements"
+  enabled: true
+  priority: 1000  # Very high priority to override denies
+  action: Allow
+
+  # No rules means this policy matches and allows all workloads in kube-system
+  rules: []
+
+  conditions:
+    - field: namespace
+      operator: Equal
+      value: kube-system

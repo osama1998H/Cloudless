@@ -1,0 +1,231 @@
+# Secure Workload Configuration Example
+# This file demonstrates how to configure workloads with enhanced security features
+# as per CLD-REQ-062 (Sandboxing and Least Privilege)
+
+workload:
+  name: secure-web-app
+  namespace: production
+  replicas: 3
+
+  # Container specification
+  image: registry.example.com/apps/web-app:v1.2.3
+  command:
+    - /app/server
+  args:
+    - --config=/etc/app/config.yaml
+    - --port=8080
+
+  # Security Context - Comprehensive security settings
+  security_context:
+
+    # Least Privilege Settings
+    privileged: false                    # Never run as privileged
+    run_as_non_root: true                # Enforce non-root user
+    run_as_user: 10001                   # Run as specific UID
+    run_as_group: 10001                  # Run as specific GID
+    read_only_root_filesystem: true      # Immutable root filesystem
+
+    # Host Namespace Isolation
+    host_network: false                  # Don't share host network
+    host_pid: false                      # Don't share host PID namespace
+    host_ipc: false                      # Don't share host IPC namespace
+
+    # Capability Management
+    capabilities_drop:
+      - ALL                              # Drop all capabilities first
+    capabilities_add:
+      - NET_BIND_SERVICE                 # Only add required capabilities
+      - CHOWN
+
+    # Linux Security Options
+    linux:
+      # Seccomp - Syscall Filtering
+      seccomp_profile:
+        type: RuntimeDefault             # Use default seccomp profile
+        # OR use custom profile:
+        # type: Localhost
+        # localhost_profile: /etc/cloudless/seccomp/custom-profile.json
+
+      # AppArmor - Mandatory Access Control
+      apparmor_profile:
+        type: RuntimeDefault             # Use Cloudless default profile
+        # OR use custom profile:
+        # type: Localhost
+        # localhost_profile: cloudless-custom
+
+      # SELinux - Type Enforcement
+      selinux_options:
+        user: system_u
+        role: system_r
+        type: cloudless_container_t
+        level: s0:c0,c1                  # MCS labels for isolation
+
+      # Additional Linux Security
+      supplemental_groups:
+        - 20000                          # Additional GIDs
+      fs_group: 10001                    # Volume ownership GID
+      sysctls:
+        net.ipv4.ip_unprivileged_port_start: "8080"
+
+    # Runtime Class - Sandboxed Execution
+    runtime_class_name: gvisor           # Use gVisor sandbox
+    # Options: runc (default), gvisor, kata, firecracker
+
+  # Resource Limits
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Volume Mounts (with read-only root, use tmpfs for writable dirs)
+  volumes:
+    - name: app-config
+      type: configMap
+      source: web-app-config
+      mount_path: /etc/app
+      read_only: true
+
+    - name: tmp
+      type: emptyDir
+      mount_path: /tmp
+      read_only: false                   # tmpfs for temporary writes
+
+    - name: cache
+      type: emptyDir
+      mount_path: /app/cache
+      read_only: false
+
+  # Network Configuration
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+
+  # Health Checks
+  health_check:
+    http_get:
+      path: /health
+      port: 8080
+    initial_delay_seconds: 10
+    period_seconds: 30
+    timeout_seconds: 5
+    failure_threshold: 3
+
+  # Environment Variables
+  env:
+    APP_ENV: production
+    LOG_LEVEL: info
+    METRICS_ENABLED: "true"
+
+  # Labels and Annotations
+  labels:
+    app: web-app
+    tier: frontend
+    environment: production
+    security-level: high
+
+  annotations:
+    description: "Highly secure web application with full sandboxing"
+    security-policy: "strict-production"
+    last-security-audit: "2025-01-15"
+
+---
+# Minimal Security Configuration (for development/testing)
+workload:
+  name: dev-app
+  namespace: development
+
+  image: registry.example.com/apps/dev-app:latest
+
+  # Minimal security for development
+  security_context:
+    privileged: false
+    run_as_non_root: true
+    run_as_user: 1000
+
+    linux:
+      seccomp_profile:
+        type: RuntimeDefault
+
+    # Default runc runtime for development
+    runtime_class_name: runc
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+---
+# High-Security Workload (for sensitive data processing)
+workload:
+  name: data-processor
+  namespace: secure-zone
+
+  image: registry.example.com/apps/data-processor:v2.0.0
+
+  # Maximum security configuration
+  security_context:
+    privileged: false
+    run_as_non_root: true
+    run_as_user: 20000
+    run_as_group: 20000
+    read_only_root_filesystem: true
+    host_network: false
+    host_pid: false
+    host_ipc: false
+
+    capabilities_drop:
+      - ALL                              # No capabilities needed
+
+    linux:
+      # Strict seccomp profile
+      seccomp_profile:
+        type: Localhost
+        localhost_profile: /etc/cloudless/seccomp/strict.json
+
+      # Custom AppArmor profile
+      apparmor_profile:
+        type: Localhost
+        localhost_profile: cloudless-strict
+
+      # SELinux with MCS isolation
+      selinux_options:
+        user: system_u
+        role: system_r
+        type: cloudless_secure_t
+        level: s0:c100,c200
+
+      fs_group: 20000
+
+    # Kata Containers for VM-level isolation
+    runtime_class_name: kata
+
+  # Strict resource limits
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  # Minimal volume mounts
+  volumes:
+    - name: secure-data
+      type: secret
+      source: data-processor-secrets
+      mount_path: /secrets
+      read_only: true
+
+    - name: tmp
+      type: emptyDir
+      mount_path: /tmp
+      read_only: false
+
+  labels:
+    security-level: critical
+    compliance: pci-dss
+    data-classification: confidential

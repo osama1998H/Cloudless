@@ -99,6 +99,27 @@ const (
 
 	// RuleTypeVolumeType restricts volume types
 	RuleTypeVolumeType RuleType = "VolumeType"
+
+	// RuleTypeSecurityContext enforces security context requirements (CLD-REQ-062)
+	RuleTypeSecurityContext RuleType = "SecurityContext"
+
+	// RuleTypeSeccompProfile enforces seccomp profile requirements
+	RuleTypeSeccompProfile RuleType = "SeccompProfile"
+
+	// RuleTypeAppArmorProfile enforces AppArmor profile requirements
+	RuleTypeAppArmorProfile RuleType = "AppArmorProfile"
+
+	// RuleTypeSELinuxOptions enforces SELinux context requirements
+	RuleTypeSELinuxOptions RuleType = "SELinuxOptions"
+
+	// RuleTypeRuntimeClass enforces runtime class restrictions
+	RuleTypeRuntimeClass RuleType = "RuntimeClass"
+
+	// RuleTypeRunAsNonRoot enforces non-root user requirement
+	RuleTypeRunAsNonRoot RuleType = "RunAsNonRoot"
+
+	// RuleTypeReadOnlyRootFS enforces read-only root filesystem
+	RuleTypeReadOnlyRootFS RuleType = "ReadOnlyRootFS"
 )
 
 // Condition represents a condition for rule application
@@ -138,7 +159,7 @@ type WorkloadSpec struct {
 	Labels      map[string]string
 	Annotations map[string]string
 
-	// Security context
+	// Security context (deprecated individual fields - use SecurityContext instead)
 	Privileged     bool
 	Capabilities   []string
 	HostNetwork    bool
@@ -148,6 +169,9 @@ type WorkloadSpec struct {
 	RunAsGroup     *int64
 	FSGroup        *int64
 	ReadOnlyRootFS bool
+
+	// SecurityContext - comprehensive security settings (CLD-REQ-062)
+	SecurityContext *PolicySecurityContext
 
 	// Resources
 	CPURequest    int64
@@ -322,4 +346,101 @@ type ResourceLimitRule struct {
 
 	// MaxLimitToRequestRatio is the max ratio of limit to request
 	MaxLimitToRequestRatio float64 `json:"max_limit_to_request_ratio,omitempty"`
+}
+
+// ============================================================================
+// Security Context Types (CLD-REQ-062)
+// ============================================================================
+
+// PolicySecurityContext represents security context for policy evaluation
+type PolicySecurityContext struct {
+	// Linux-specific security options
+	Linux *PolicyLinuxSecurityOptions `json:"linux,omitempty"`
+
+	// Run container as privileged
+	Privileged bool `json:"privileged,omitempty"`
+
+	// Allow host network access
+	HostNetwork bool `json:"host_network,omitempty"`
+
+	// Allow host PID namespace
+	HostPID bool `json:"host_pid,omitempty"`
+
+	// Allow host IPC namespace
+	HostIPC bool `json:"host_ipc,omitempty"`
+
+	// User ID to run as
+	RunAsUser *int64 `json:"run_as_user,omitempty"`
+
+	// Group ID to run as
+	RunAsGroup *int64 `json:"run_as_group,omitempty"`
+
+	// Run as non-root user
+	RunAsNonRoot *bool `json:"run_as_non_root,omitempty"`
+
+	// Read-only root filesystem
+	ReadOnlyRootFilesystem bool `json:"read_only_root_filesystem,omitempty"`
+
+	// Capabilities to add
+	CapabilitiesAdd []string `json:"capabilities_add,omitempty"`
+
+	// Capabilities to drop
+	CapabilitiesDrop []string `json:"capabilities_drop,omitempty"`
+
+	// RuntimeClassName for alternative runtimes
+	RuntimeClassName string `json:"runtime_class_name,omitempty"`
+}
+
+// PolicyLinuxSecurityOptions contains Linux-specific security settings for policy
+type PolicyLinuxSecurityOptions struct {
+	// Seccomp profile
+	SeccompProfile *PolicySeccompProfile `json:"seccomp_profile,omitempty"`
+
+	// AppArmor profile
+	AppArmorProfile *PolicyAppArmorProfile `json:"apparmor_profile,omitempty"`
+
+	// SELinux options
+	SELinuxOptions *PolicySELinuxOptions `json:"selinux_options,omitempty"`
+
+	// Supplemental groups
+	SupplementalGroups []int64 `json:"supplemental_groups,omitempty"`
+
+	// FSGroup for volume ownership
+	FSGroup *int64 `json:"fs_group,omitempty"`
+
+	// Sysctls to set
+	Sysctls map[string]string `json:"sysctls,omitempty"`
+}
+
+// PolicySeccompProfile represents a seccomp profile for policy evaluation
+type PolicySeccompProfile struct {
+	// Type of seccomp profile
+	Type string `json:"type"`
+
+	// LocalhostProfile for custom profiles
+	LocalhostProfile string `json:"localhost_profile,omitempty"`
+}
+
+// PolicyAppArmorProfile represents an AppArmor profile for policy evaluation
+type PolicyAppArmorProfile struct {
+	// Type of AppArmor profile
+	Type string `json:"type"`
+
+	// LocalhostProfile for custom profiles
+	LocalhostProfile string `json:"localhost_profile,omitempty"`
+}
+
+// PolicySELinuxOptions represents SELinux options for policy evaluation
+type PolicySELinuxOptions struct {
+	// User is the SELinux user label
+	User string `json:"user,omitempty"`
+
+	// Role is the SELinux role label
+	Role string `json:"role,omitempty"`
+
+	// Type is the SELinux type label
+	Type string `json:"type,omitempty"`
+
+	// Level is the SELinux level label
+	Level string `json:"level,omitempty"`
 }

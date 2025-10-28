@@ -181,14 +181,187 @@ func (r *ContainerdRuntime) CreateContainer(ctx context.Context, spec ContainerS
 		}))
 	}
 
-	// Create container
-	container, err := r.client.NewContainer(
-		ctx,
-		spec.ID,
+	// Apply security context (CLD-REQ-062: sandboxing and least privilege)
+	if spec.SecurityContext != nil {
+		specOpts = append(specOpts, func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+			// Apply seccomp profile
+			if spec.SecurityContext.Linux != nil && spec.SecurityContext.Linux.SeccompProfile != nil {
+				if err := ApplySeccompProfile(s, spec.SecurityContext.Linux.SeccompProfile, r.logger); err != nil {
+					return fmt.Errorf("failed to apply seccomp profile: %w", err)
+				}
+			}
+
+			// Apply AppArmor profile
+			if spec.SecurityContext.Linux != nil && spec.SecurityContext.Linux.AppArmorProfile != nil {
+				if err := ApplyAppArmorProfile(s, spec.SecurityContext.Linux.AppArmorProfile, r.logger); err != nil {
+					return fmt.Errorf("failed to apply AppArmor profile: %w", err)
+				}
+			}
+
+			// Apply SELinux options
+			if spec.SecurityContext.Linux != nil && spec.SecurityContext.Linux.SELinuxOptions != nil {
+				if err := ApplySELinuxOptions(s, spec.SecurityContext.Linux.SELinuxOptions, r.logger); err != nil {
+					return fmt.Errorf("failed to apply SELinux options: %w", err)
+				}
+			}
+
+			// Apply privileged mode
+			if spec.SecurityContext.Privileged {
+				r.logger.Warn("Container running in privileged mode - security features disabled",
+					zap.String("container_id", spec.ID))
+				// Privileged containers bypass most security restrictions
+				if s.Linux != nil {
+					// Clear seccomp when privileged
+					s.Linux.Seccomp = nil
+				}
+			}
+
+			// Apply read-only root filesystem
+			if spec.SecurityContext.ReadOnlyRootFilesystem {
+				if s.Root == nil {
+					s.Root = &specs.Root{}
+				}
+				s.Root.Readonly = true
+				r.logger.Debug("Enabled read-only root filesystem",
+					zap.String("container_id", spec.ID))
+			}
+
+			// Apply RunAsUser
+			if spec.SecurityContext.RunAsUser != nil {
+				if s.Process == nil {
+					s.Process = &specs.Process{}
+				}
+				if s.Process.User.UID == 0 && *spec.SecurityContext.RunAsUser != 0 {
+					s.Process.User.UID = uint32(*spec.SecurityContext.RunAsUser)
+					r.logger.Debug("Set user ID",
+						zap.String("container_id", spec.ID),
+						zap.Int64("uid", *spec.SecurityContext.RunAsUser))
+				}
+			}
+
+			// Apply RunAsGroup
+			if spec.SecurityContext.RunAsGroup != nil {
+				if s.Process == nil {
+					s.Process = &specs.Process{}
+				}
+				s.Process.User.GID = uint32(*spec.SecurityContext.RunAsGroup)
+				r.logger.Debug("Set group ID",
+					zap.String("container_id", spec.ID),
+					zap.Int64("gid", *spec.SecurityContext.RunAsGroup))
+			}
+
+			// Enforce RunAsNonRoot
+			if spec.SecurityContext.RunAsNonRoot != nil && *spec.SecurityContext.RunAsNonRoot {
+				if s.Process == nil {
+					s.Process = &specs.Process{}
+				}
+				if s.Process.User.UID == 0 {
+					return fmt.Errorf("container must not run as root (RunAsNonRoot=true)")
+				}
+				r.logger.Debug("Enforced non-root user requirement",
+					zap.String("container_id", spec.ID))
+			}
+
+			// Apply capabilities
+			if len(spec.SecurityContext.CapabilitiesAdd) > 0 || len(spec.SecurityContext.CapabilitiesDrop) > 0 {
+				if s.Process == nil {
+					s.Process = &specs.Process{}
+				}
+				if s.Process.Capabilities == nil {
+					// Start with default capabilities
+					s.Process.Capabilities = &specs.LinuxCapabilities{
+						Bounding: []string{
+							"CAP_CHOWN",
+							"CAP_DAC_OVERRIDE",
+							"CAP_FSETID",
+							"CAP_FOWNER",
+							"CAP_MKNOD",
+							"CAP_NET_RAW",
+							"CAP_SETGID",
+							"CAP_SETUID",
+							"CAP_SETFCAP",
+							"CAP_SETPCAP",
+							"CAP_NET_BIND_SERVICE",
+							"CAP_SYS_CHROOT",
+							"CAP_KILL",
+							"CAP_AUDIT_WRITE",
+						},
+					}
+					s.Process.Capabilities.Effective = s.Process.Capabilities.Bounding
+					s.Process.Capabilities.Inheritable = s.Process.Capabilities.Bounding
+					s.Process.Capabilities.Permitted = s.Process.Capabilities.Bounding
+					s.Process.Capabilities.Ambient = s.Process.Capabilities.Bounding
+				}
+
+				// Drop capabilities
+				for _, cap := range spec.SecurityContext.CapabilitiesDrop {
+					s.Process.Capabilities.Bounding = removeCapability(s.Process.Capabilities.Bounding, cap)
+					s.Process.Capabilities.Effective = removeCapability(s.Process.Capabilities.Effective, cap)
+					s.Process.Capabilities.Inheritable = removeCapability(s.Process.Capabilities.Inheritable, cap)
+					s.Process.Capabilities.Permitted = removeCapability(s.Process.Capabilities.Permitted, cap)
+					s.Process.Capabilities.Ambient = removeCapability(s.Process.Capabilities.Ambient, cap)
+				}
+
+				// Add capabilities
+				for _, cap := range spec.SecurityContext.CapabilitiesAdd {
+					if !containsCap(s.Process.Capabilities.Bounding, cap) {
+						s.Process.Capabilities.Bounding = append(s.Process.Capabilities.Bounding, cap)
+						s.Process.Capabilities.Effective = append(s.Process.Capabilities.Effective, cap)
+						s.Process.Capabilities.Inheritable = append(s.Process.Capabilities.Inheritable, cap)
+						s.Process.Capabilities.Permitted = append(s.Process.Capabilities.Permitted, cap)
+						s.Process.Capabilities.Ambient = append(s.Process.Capabilities.Ambient, cap)
+					}
+				}
+
+				r.logger.Debug("Applied capability restrictions",
+					zap.String("container_id", spec.ID),
+					zap.Strings("drop", spec.SecurityContext.CapabilitiesDrop),
+					zap.Strings("add", spec.SecurityContext.CapabilitiesAdd))
+			}
+
+			// Apply RuntimeClass spec modifications
+			if spec.SecurityContext != nil && spec.SecurityContext.RuntimeClassName != "" {
+				if err := ApplyRuntimeClassSpec(s, spec.SecurityContext.RuntimeClassName, r.logger); err != nil {
+					return fmt.Errorf("failed to apply runtime class spec: %w", err)
+				}
+			}
+
+			return nil
+		})
+	}
+
+	// Determine runtime class
+	runtimeClassName := GetDefaultRuntimeClass()
+	if spec.SecurityContext != nil && spec.SecurityContext.RuntimeClassName != "" {
+		runtimeClassName = spec.SecurityContext.RuntimeClassName
+	}
+
+	// Build container options with runtime class support
+	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
 		containerd.WithNewSnapshot(spec.ID+"-snapshot", image),
 		containerd.WithNewSpec(specOpts...),
 		containerd.WithContainerLabels(spec.Labels),
+	}
+
+	// Add runtime class option if not default
+	if runtimeClassName != GetDefaultRuntimeClass() {
+		runtimeOpt, err := GetContainerdRuntimeOpt(runtimeClassName, r.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get runtime option: %w", err)
+		}
+		containerOpts = append(containerOpts, runtimeOpt)
+
+		r.logger.Info("Using non-default runtime",
+			zap.String("container_id", spec.ID),
+			zap.String("runtime_class", runtimeClassName))
+	}
+
+	// Create container
+	container, err := r.client.NewContainer(
+		ctx,
+		spec.ID,
+		containerOpts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -581,4 +754,27 @@ func (r *ContainerdRuntime) ExecContainer(ctx context.Context, containerID strin
 	)
 
 	return result, nil
+}
+
+// Helper functions for security context
+
+// removeCapability removes a capability from a slice
+func removeCapability(caps []string, cap string) []string {
+	result := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c != cap {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+// containsCap checks if a capability exists in a slice
+func containsCap(caps []string, cap string) bool {
+	for _, c := range caps {
+		if c == cap {
+			return true
+		}
+	}
+	return false
 }

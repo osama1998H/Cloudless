@@ -212,6 +212,126 @@ Agents use containerd for container management:
 - `pkg/coordinator/enrollment.go` - Token validation
 - `deployments/docker/certs/` - Development certificates
 
+### Workload Sandboxing and Security (CLD-REQ-062)
+
+Cloudless implements comprehensive workload sandboxing and least privilege controls for container security.
+
+**Security Features**:
+
+1. **Seccomp (Secure Computing Mode)** - Syscall filtering
+   - Default profile: Whitelists ~300 common syscalls
+   - Strict profile: Minimal syscall set for high-security workloads
+   - Custom profiles: Load from `/etc/cloudless/seccomp/`
+   - Embedded profiles: Default/strict profiles built into binary
+   - Configuration: `security_context.linux.seccomp_profile.type` (RuntimeDefault, Localhost, Unconfined)
+
+2. **AppArmor (Application Armor)** - Mandatory Access Control
+   - Default profile: `cloudless-default` with file/network/capabilities restrictions
+   - Custom profiles: Install to `/etc/apparmor.d/`
+   - Feature detection: Gracefully handles systems without AppArmor
+   - Configuration: `security_context.linux.apparmor_profile.type`
+
+3. **SELinux (Security-Enhanced Linux)** - Type Enforcement
+   - Default type: `cloudless_container_t`
+   - MCS support: Multi-Category Security for container isolation
+   - Policy module: `config/selinux/cloudless.te`
+   - Auto-detection: Checks for enforcing/permissive/disabled mode
+   - Configuration: `security_context.linux.selinux_options`
+
+4. **RuntimeClass** - Alternative Container Runtimes
+   - **runc** (default): Standard OCI runtime
+   - **gVisor**: Userspace kernel providing strong isolation
+   - **Kata Containers**: Lightweight VM per container
+   - **Firecracker**: AWS microVM-based runtime
+   - Configuration: `security_context.runtime_class_name`
+
+5. **Least Privilege Controls**
+   - **RunAsNonRoot**: Enforce non-root user execution
+   - **RunAsUser/RunAsGroup**: Specify UID/GID
+   - **ReadOnlyRootFilesystem**: Immutable root filesystem
+   - **Capability Management**: Drop ALL, selectively add required caps
+   - **Host Namespace Isolation**: Prevent host network/PID/IPC sharing
+
+**Policy Enforcement**:
+
+The policy engine supports 7 new rule types for security validation:
+- `SecurityContext`: Comprehensive security context requirements
+- `SeccompProfile`: Seccomp profile enforcement
+- `AppArmorProfile`: AppArmor profile enforcement
+- `SELinuxOptions`: SELinux context validation
+- `RuntimeClass`: Runtime class restrictions
+- `RunAsNonRoot`: Non-root user enforcement
+- `ReadOnlyRootFS`: Read-only root filesystem enforcement
+
+**Configuration Examples**:
+
+Basic secure workload:
+```yaml
+security_context:
+  run_as_non_root: true
+  run_as_user: 10001
+  read_only_root_filesystem: true
+  capabilities_drop: [ALL]
+  capabilities_add: [NET_BIND_SERVICE]
+  linux:
+    seccomp_profile:
+      type: RuntimeDefault
+  runtime_class_name: gvisor
+```
+
+Maximum security workload:
+```yaml
+security_context:
+  privileged: false
+  run_as_non_root: true
+  run_as_user: 20000
+  read_only_root_filesystem: true
+  host_network: false
+  host_pid: false
+  host_ipc: false
+  capabilities_drop: [ALL]
+  linux:
+    seccomp_profile:
+      type: Localhost
+      localhost_profile: /etc/cloudless/seccomp/strict.json
+    apparmor_profile:
+      type: Localhost
+      localhost_profile: cloudless-strict
+    selinux_options:
+      user: system_u
+      role: system_r
+      type: cloudless_secure_t
+      level: s0:c100,c200
+  runtime_class_name: kata
+```
+
+**Key Files**:
+- `pkg/runtime/seccomp.go` - Seccomp profile loading and application
+- `pkg/runtime/apparmor.go` - AppArmor profile verification and application
+- `pkg/runtime/selinux.go` - SELinux context management
+- `pkg/runtime/runtimeclass.go` - Runtime class selection
+- `pkg/runtime/container.go` - Security context integration
+- `pkg/policy/evaluator.go` - Security policy evaluation
+- `config/seccomp/` - Embedded seccomp profiles
+- `config/apparmor/cloudless-default` - Default AppArmor profile
+- `config/selinux/cloudless.te` - SELinux policy module
+- `config/workload-secure-example.yaml` - Security configuration examples
+- `config/policy-security-example.yaml` - Policy examples
+
+**Testing**:
+- Unit tests: `pkg/runtime/security_test.go` (31 tests)
+- Policy tests: `pkg/policy/security_test.go` (45 tests covering all 7 rule types)
+- Run with: `go test ./pkg/runtime ./pkg/policy -v -run Security`
+
+**Platform Notes**:
+- Seccomp: Available on all Linux kernels 3.5+
+- AppArmor: Ubuntu/Debian default, optional on other distros
+- SELinux: RHEL/CentOS/Fedora default, optional on other distros
+- RuntimeClass: Requires containerd 1.2+ with appropriate runtime shims installed
+
+**Graceful Degradation**:
+All security features detect platform availability and log warnings rather than failing when features are unavailable. This allows development on macOS/Windows while enforcing security in production Linux environments.
+
 ## Observability Stack
 
 ### Loki Log Aggregation

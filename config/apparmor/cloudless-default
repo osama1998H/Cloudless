@@ -1,0 +1,141 @@
+#include <tunables/global>
+
+profile cloudless-default flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Network access
+  network inet tcp,
+  network inet udp,
+  network inet icmp,
+  network inet6 tcp,
+  network inet6 udp,
+  network inet6 icmp,
+  network unix stream,
+  network unix dgram,
+
+  # File system access - allow most reads, restrict writes
+  file,
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+
+  # Allow /proc access (needed for many applications)
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/k[^e]** w,
+  deny @{PROC}/sys/ke[^r]** w,
+  deny @{PROC}/sys/ker[^n]** w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny @{PROC}/kmem rwklx,
+  deny @{PROC}/mem rwklx,
+
+  # Capabilities - allow common capabilities, deny dangerous ones
+  capability chown,
+  capability dac_override,
+  capability dac_read_search,
+  capability fowner,
+  capability fsetid,
+  capability kill,
+  capability setgid,
+  capability setuid,
+  capability setpcap,
+  capability linux_immutable,
+  capability net_bind_service,
+  capability net_broadcast,
+  capability net_admin,
+  capability net_raw,
+  capability ipc_lock,
+  capability ipc_owner,
+  capability sys_chroot,
+  capability sys_ptrace,
+  capability sys_admin,
+  capability sys_boot,
+  capability sys_nice,
+  capability sys_resource,
+  capability sys_time,
+  capability sys_tty_config,
+  capability mknod,
+  capability lease,
+  capability audit_write,
+  capability audit_control,
+  capability setfcap,
+
+  # Deny dangerous capabilities
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny capability sys_pacct,
+  deny capability mac_override,
+  deny capability mac_admin,
+  deny capability syslog,
+  deny capability wake_alarm,
+  deny capability block_suspend,
+  deny capability audit_read,
+
+  # Deny access to system directories that containers shouldn't modify
+  deny /boot/** rwklx,
+  deny /dev/mem rwklx,
+  deny /dev/kmem rwklx,
+  deny /dev/port rwklx,
+  deny /dev/kcore rwklx,
+
+  # Signals - allow common signals
+  signal (send receive) set=(term, int, quit, hup, kill, usr1, usr2, pipe, alrm, cont, stop, tstp, ttin, ttou, urg, xcpu, xfsz, vtalrm, prof, winch, io, pwr),
+
+  # Ptrace - allow ptrace within same container
+  ptrace (read, trace) peer=cloudless-default,
+
+  # Mount operations - containers typically don't need to mount
+  deny mount,
+  deny remount,
+  deny pivot_root,
+
+  # Unix domain sockets
+  unix,
+
+  # Allow /tmp and /var/tmp
+  /tmp/** rw,
+  /var/tmp/** rw,
+
+  # Allow container filesystem (typically overlayfs)
+  / rw,
+  /** rw,
+
+  # Deny writes to critical host directories if somehow accessible
+  deny /etc/apparmor.d/** wklx,
+  deny /etc/apparmor/** wklx,
+  deny /etc/default/apparmor wklx,
+  deny /etc/security/** wklx,
+
+  # Allow access to common library directories
+  /lib/** mr,
+  /lib64/** mr,
+  /usr/lib/** mr,
+  /usr/local/lib/** mr,
+
+  # Allow execution of programs
+  /bin/** ix,
+  /sbin/** ix,
+  /usr/bin/** ix,
+  /usr/sbin/** ix,
+  /usr/local/bin/** ix,
+  /usr/local/sbin/** ix,
+
+  # Container runtime specific
+  deny /run/containerd/** wklx,
+  deny /run/docker/** wklx,
+  deny /var/lib/containerd/** wklx,
+  deny /var/lib/docker/** wklx,
+
+  # Allow container logs
+  /var/log/** rw,
+
+  # Site-specific additions and overrides
+  #include <local/cloudless-default>
+}

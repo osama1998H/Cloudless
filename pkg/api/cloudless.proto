@@ -263,6 +263,7 @@ message WorkloadSpec {
   HealthCheck liveness_probe = 12;
   HealthCheck readiness_probe = 13;
   repeated string image_pull_secrets = 14;
+  SecurityContext security_context = 15;
 }
 
 // ResourceRequirements defines resource needs
@@ -381,6 +382,102 @@ message HTTPHeader {
 
 message TCPProbe {
   int32 port = 1;
+}
+
+// SecurityContext defines security attributes for workloads
+// CLD-REQ-062: Workloads run with least privilege and optional sandboxing
+message SecurityContext {
+  // Linux-specific security options
+  LinuxSecurityOptions linux = 1;
+
+  // Windows-specific options (future)
+  // WindowsSecurityOptions windows = 2;
+
+  // Run container as privileged (dangerous - requires explicit policy)
+  bool privileged = 3;
+
+  // Allow host network access
+  bool host_network = 4;
+
+  // Allow host PID namespace
+  bool host_pid = 5;
+
+  // Allow host IPC namespace
+  bool host_ipc = 6;
+
+  // User to run the container process as
+  int64 run_as_user = 7;
+
+  // Group to run the container process as
+  int64 run_as_group = 8;
+
+  // Run as non-root user (enforced)
+  bool run_as_non_root = 9;
+
+  // Read-only root filesystem
+  bool read_only_root_filesystem = 10;
+
+  // Capabilities to add
+  repeated string capabilities_add = 11;
+
+  // Capabilities to drop
+  repeated string capabilities_drop = 12;
+
+  // RuntimeClassName for alternative runtimes (gVisor, kata, runc)
+  string runtime_class_name = 13;
+}
+
+// LinuxSecurityOptions contains Linux-specific security settings
+message LinuxSecurityOptions {
+  // Seccomp profile
+  SeccompProfile seccomp_profile = 1;
+
+  // AppArmor profile
+  AppArmorProfile apparmor_profile = 2;
+
+  // SELinux options
+  SELinuxOptions selinux_options = 3;
+
+  // Supplemental groups
+  repeated int64 supplemental_groups = 4;
+
+  // FSGroup for volume ownership
+  int64 fs_group = 5;
+
+  // Sysctls to set
+  map<string, string> sysctls = 6;
+}
+
+// SeccompProfile defines a seccomp profile
+message SeccompProfile {
+  enum ProfileType {
+    UNCONFINED = 0;       // No seccomp filtering
+    RUNTIME_DEFAULT = 1;  // Container runtime's default profile
+    LOCALHOST = 2;        // Profile from localhost path
+  }
+
+  ProfileType type = 1;
+  string localhost_profile = 2;  // Path to profile (when type=LOCALHOST)
+}
+
+// AppArmorProfile defines an AppArmor profile
+message AppArmorProfile {
+  enum ProfileType {
+    UNCONFINED = 0;       // No AppArmor enforcement
+    RUNTIME_DEFAULT = 1;  // Container runtime's default profile
+    LOCALHOST = 2;        // Profile from localhost path
+  }
+
+  ProfileType type = 1;
+  string localhost_profile = 2;  // Profile name (when type=LOCALHOST)
+}
+
+// SELinuxOptions defines SELinux context
+message SELinuxOptions {
+  string user = 1;   // SELinux user label
+  string role = 2;   // SELinux role label
+  string type = 3;   // SELinux type label
+  string level = 4;  // SELinux level label
 }
 
 // WorkloadStatus represents current workload state

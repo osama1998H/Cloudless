@@ -39,6 +39,20 @@ func (e *Evaluator) EvaluateRule(rule Rule, spec WorkloadSpec) []Violation {
 		return e.evaluateHostNetwork(rule, spec)
 	case RuleTypeVolumeType:
 		return e.evaluateVolumeType(rule, spec)
+	case RuleTypeSecurityContext:
+		return e.evaluateSecurityContext(rule, spec)
+	case RuleTypeSeccompProfile:
+		return e.evaluateSeccompProfile(rule, spec)
+	case RuleTypeAppArmorProfile:
+		return e.evaluateAppArmorProfile(rule, spec)
+	case RuleTypeSELinuxOptions:
+		return e.evaluateSELinuxOptions(rule, spec)
+	case RuleTypeRuntimeClass:
+		return e.evaluateRuntimeClass(rule, spec)
+	case RuleTypeRunAsNonRoot:
+		return e.evaluateRunAsNonRoot(rule, spec)
+	case RuleTypeReadOnlyRootFS:
+		return e.evaluateReadOnlyRootFS(rule, spec)
 	default:
 		e.logger.Warn("Unknown rule type", zap.String("type", string(rule.Type)))
 		return nil
@@ -457,4 +471,449 @@ func (e *Evaluator) matchesPattern(value, pattern string) bool {
 	}
 
 	return matched
+}
+
+// ============================================================================
+// Security Context Evaluation Functions (CLD-REQ-062)
+// ============================================================================
+
+// evaluateSecurityContext checks comprehensive security context requirements
+func (e *Evaluator) evaluateSecurityContext(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	requireSecurityContext, _ := rule.Config["require_security_context"].(bool)
+	if requireSecurityContext && spec.SecurityContext == nil {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Security context is required by policy but not specified",
+			Severity: "High",
+			Field:    "security_context",
+			Value:    "nil",
+		})
+		return violations
+	}
+
+	if spec.SecurityContext == nil {
+		return violations
+	}
+
+	// Check if privileged is forbidden
+	forbidPrivileged, _ := rule.Config["forbid_privileged"].(bool)
+	if forbidPrivileged && spec.SecurityContext.Privileged {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Privileged containers are forbidden by security policy",
+			Severity: "Critical",
+			Field:    "security_context.privileged",
+			Value:    "true",
+		})
+	}
+
+	// Check RunAsNonRoot requirement
+	requireNonRoot, _ := rule.Config["require_non_root"].(bool)
+	if requireNonRoot {
+		if spec.SecurityContext.RunAsNonRoot == nil || !*spec.SecurityContext.RunAsNonRoot {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  "RunAsNonRoot must be set to true",
+				Severity: "High",
+				Field:    "security_context.run_as_non_root",
+				Value:    "false or unset",
+			})
+		}
+	}
+
+	// Check ReadOnlyRootFilesystem requirement
+	requireReadOnlyRoot, _ := rule.Config["require_read_only_root"].(bool)
+	if requireReadOnlyRoot && !spec.SecurityContext.ReadOnlyRootFilesystem {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Read-only root filesystem is required by policy",
+			Severity: "Medium",
+			Field:    "security_context.read_only_root_filesystem",
+			Value:    "false",
+		})
+	}
+
+	return violations
+}
+
+// evaluateSeccompProfile checks seccomp profile requirements
+func (e *Evaluator) evaluateSeccompProfile(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	requireSeccomp, _ := rule.Config["require_seccomp"].(bool)
+	allowedTypes, _ := rule.Config["allowed_types"].([]interface{})
+	forbidUnconfined, _ := rule.Config["forbid_unconfined"].(bool)
+
+	if spec.SecurityContext == nil || spec.SecurityContext.Linux == nil || spec.SecurityContext.Linux.SeccompProfile == nil {
+		if requireSeccomp {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  "Seccomp profile is required by policy but not specified",
+				Severity: "High",
+				Field:    "security_context.linux.seccomp_profile",
+				Value:    "nil",
+			})
+		}
+		return violations
+	}
+
+	profile := spec.SecurityContext.Linux.SeccompProfile
+
+	// Check if unconfined is forbidden
+	if forbidUnconfined && profile.Type == "Unconfined" {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Unconfined seccomp profile is not allowed by policy",
+			Severity: "Critical",
+			Field:    "security_context.linux.seccomp_profile.type",
+			Value:    "Unconfined",
+		})
+	}
+
+	// Check allowed types
+	if len(allowedTypes) > 0 {
+		allowed := false
+		for _, typeInterface := range allowedTypes {
+			if allowedType, ok := typeInterface.(string); ok {
+				if string(profile.Type) == allowedType {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if !allowed {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  fmt.Sprintf("Seccomp profile type '%s' is not in allowed list", profile.Type),
+				Severity: "High",
+				Field:    "security_context.linux.seccomp_profile.type",
+				Value:    string(profile.Type),
+			})
+		}
+	}
+
+	return violations
+}
+
+// evaluateAppArmorProfile checks AppArmor profile requirements
+func (e *Evaluator) evaluateAppArmorProfile(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	requireAppArmor, _ := rule.Config["require_apparmor"].(bool)
+	allowedTypes, _ := rule.Config["allowed_types"].([]interface{})
+	forbidUnconfined, _ := rule.Config["forbid_unconfined"].(bool)
+
+	if spec.SecurityContext == nil || spec.SecurityContext.Linux == nil || spec.SecurityContext.Linux.AppArmorProfile == nil {
+		if requireAppArmor {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  "AppArmor profile is required by policy but not specified",
+				Severity: "High",
+				Field:    "security_context.linux.apparmor_profile",
+				Value:    "nil",
+			})
+		}
+		return violations
+	}
+
+	profile := spec.SecurityContext.Linux.AppArmorProfile
+
+	// Check if unconfined is forbidden
+	if forbidUnconfined && profile.Type == "Unconfined" {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Unconfined AppArmor profile is not allowed by policy",
+			Severity: "Critical",
+			Field:    "security_context.linux.apparmor_profile.type",
+			Value:    "Unconfined",
+		})
+	}
+
+	// Check allowed types
+	if len(allowedTypes) > 0 {
+		allowed := false
+		for _, typeInterface := range allowedTypes {
+			if allowedType, ok := typeInterface.(string); ok {
+				if string(profile.Type) == allowedType {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if !allowed {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  fmt.Sprintf("AppArmor profile type '%s' is not in allowed list", profile.Type),
+				Severity: "High",
+				Field:    "security_context.linux.apparmor_profile.type",
+				Value:    string(profile.Type),
+			})
+		}
+	}
+
+	return violations
+}
+
+// evaluateSELinuxOptions checks SELinux context requirements
+func (e *Evaluator) evaluateSELinuxOptions(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	requireSELinux, _ := rule.Config["require_selinux"].(bool)
+	requiredType, _ := rule.Config["required_type"].(string)
+	requiredLevel, _ := rule.Config["required_level"].(string)
+	allowedTypes, _ := rule.Config["allowed_types"].([]interface{})
+
+	if spec.SecurityContext == nil || spec.SecurityContext.Linux == nil || spec.SecurityContext.Linux.SELinuxOptions == nil {
+		if requireSELinux {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  "SELinux options are required by policy but not specified",
+				Severity: "Medium",
+				Field:    "security_context.linux.selinux_options",
+				Value:    "nil",
+			})
+		}
+		return violations
+	}
+
+	options := spec.SecurityContext.Linux.SELinuxOptions
+
+	// Check allowed types
+	if len(allowedTypes) > 0 {
+		allowed := false
+		for _, typeInterface := range allowedTypes {
+			if allowedType, ok := typeInterface.(string); ok {
+				if options.Type == allowedType {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if !allowed {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  fmt.Sprintf("SELinux type '%s' is not in allowed list", options.Type),
+				Severity: "High",
+				Field:    "security_context.linux.selinux_options.type",
+				Value:    options.Type,
+			})
+		}
+	}
+
+	// Check required type
+	if requiredType != "" && options.Type != requiredType {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  fmt.Sprintf("SELinux type must be '%s', got '%s'", requiredType, options.Type),
+			Severity: "High",
+			Field:    "security_context.linux.selinux_options.type",
+			Value:    options.Type,
+		})
+	}
+
+	// Check required level
+	if requiredLevel != "" && options.Level != requiredLevel {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  fmt.Sprintf("SELinux level must be '%s', got '%s'", requiredLevel, options.Level),
+			Severity: "Medium",
+			Field:    "security_context.linux.selinux_options.level",
+			Value:    options.Level,
+		})
+	}
+
+	return violations
+}
+
+// evaluateRuntimeClass checks runtime class restrictions
+func (e *Evaluator) evaluateRuntimeClass(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	allowedClasses, _ := rule.Config["allowed_classes"].([]interface{})
+	allowedRuntimeClasses, _ := rule.Config["allowed_runtime_classes"].([]interface{})
+	forbiddenClasses, _ := rule.Config["forbidden_classes"].([]interface{})
+	requireRuntimeClass, _ := rule.Config["require_runtime_class"].(bool)
+	requireSandboxed, _ := rule.Config["require_sandboxed"].(bool)
+
+	// Support both "allowed_classes" and "allowed_runtime_classes"
+	if len(allowedRuntimeClasses) > 0 {
+		allowedClasses = allowedRuntimeClasses
+	}
+
+	runtimeClass := ""
+	if spec.SecurityContext != nil {
+		runtimeClass = spec.SecurityContext.RuntimeClassName
+	}
+
+	// Check if runtime class is required
+	if requireRuntimeClass && runtimeClass == "" {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Runtime class is required by policy but not specified",
+			Severity: "Medium",
+			Field:    "security_context.runtime_class_name",
+			Value:    "empty",
+		})
+		return violations
+	}
+
+	// Check if sandboxed runtime is required
+	sandboxedRuntimes := map[string]bool{
+		"gvisor":      true,
+		"kata":        true,
+		"firecracker": true,
+	}
+
+	if requireSandboxed {
+		if runtimeClass == "" || runtimeClass == "runc" || !sandboxedRuntimes[runtimeClass] {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  fmt.Sprintf("Sandboxed runtime required but got '%s'", runtimeClass),
+				Severity: "High",
+				Field:    "security_context.runtime_class_name",
+				Value:    runtimeClass,
+			})
+		}
+	}
+
+	// Check forbidden classes
+	for _, forbiddenInterface := range forbiddenClasses {
+		if forbidden, ok := forbiddenInterface.(string); ok {
+			if runtimeClass == forbidden {
+				violations = append(violations, Violation{
+					RuleName: rule.Name,
+					Message:  fmt.Sprintf("Runtime class '%s' is forbidden by policy", runtimeClass),
+					Severity: "High",
+					Field:    "security_context.runtime_class_name",
+					Value:    runtimeClass,
+				})
+			}
+		}
+	}
+
+	// Check allowed classes
+	if len(allowedClasses) > 0 && runtimeClass != "" {
+		allowed := false
+		for _, allowedInterface := range allowedClasses {
+			if allowedClass, ok := allowedInterface.(string); ok {
+				if runtimeClass == allowedClass {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if !allowed {
+			violations = append(violations, Violation{
+				RuleName: rule.Name,
+				Message:  fmt.Sprintf("Runtime class '%s' is not in allowed list", runtimeClass),
+				Severity: "High",
+				Field:    "security_context.runtime_class_name",
+				Value:    runtimeClass,
+			})
+		}
+	}
+
+	return violations
+}
+
+// evaluateRunAsNonRoot enforces non-root user requirement
+func (e *Evaluator) evaluateRunAsNonRoot(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	enforceNonRoot, _ := rule.Config["enforce"].(bool)
+	if !enforceNonRoot {
+		return violations
+	}
+
+	if spec.SecurityContext == nil {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Security context is required to enforce RunAsNonRoot",
+			Severity: "High",
+			Field:    "security_context",
+			Value:    "nil",
+		})
+		return violations
+	}
+
+	// Check if non-root is satisfied by either RunAsNonRoot field OR RunAsUser > 0
+	hasRunAsNonRoot := spec.SecurityContext.RunAsNonRoot != nil && *spec.SecurityContext.RunAsNonRoot
+	hasNonRootUser := spec.SecurityContext.RunAsUser != nil && *spec.SecurityContext.RunAsUser > 0
+	hasRootUser := spec.SecurityContext.RunAsUser != nil && *spec.SecurityContext.RunAsUser == 0
+
+	// If RunAsUser is explicitly set to root, that's a violation regardless of RunAsNonRoot
+	if hasRootUser {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "RunAsUser cannot be 0 (root) when RunAsNonRoot is required",
+			Severity: "Critical",
+			Field:    "security_context.run_as_user",
+			Value:    "0",
+		})
+		return violations
+	}
+
+	// If neither RunAsNonRoot nor a non-root RunAsUser is set, that's a violation
+	if !hasRunAsNonRoot && !hasNonRootUser {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "RunAsNonRoot must be explicitly set to true",
+			Severity: "High",
+			Field:    "security_context.run_as_non_root",
+			Value:    "false or unset",
+		})
+	}
+
+	return violations
+}
+
+// evaluateReadOnlyRootFS enforces read-only root filesystem requirement
+func (e *Evaluator) evaluateReadOnlyRootFS(rule Rule, spec WorkloadSpec) []Violation {
+	var violations []Violation
+
+	enforceReadOnly, _ := rule.Config["enforce"].(bool)
+	if !enforceReadOnly {
+		return violations
+	}
+
+	exceptions, _ := rule.Config["exceptions"].([]interface{})
+
+	// Check if workload is in exceptions list
+	for _, exceptionInterface := range exceptions {
+		if exception, ok := exceptionInterface.(string); ok {
+			if spec.Name == exception {
+				// Workload is in exceptions list, skip enforcement
+				return violations
+			}
+		}
+	}
+
+	if spec.SecurityContext == nil {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Security context is required to enforce ReadOnlyRootFilesystem",
+			Severity: "Medium",
+			Field:    "security_context",
+			Value:    "nil",
+		})
+		return violations
+	}
+
+	if !spec.SecurityContext.ReadOnlyRootFilesystem {
+		violations = append(violations, Violation{
+			RuleName: rule.Name,
+			Message:  "Read-only root filesystem is required by policy",
+			Severity: "Medium",
+			Field:    "security_context.read_only_root_filesystem",
+			Value:    "false",
+		})
+	}
+
+	return violations
 }

@@ -95,9 +95,11 @@ func (e *Engine) Evaluate(ctx PolicyContext, spec WorkloadSpec) (*EvaluationResu
 
 			switch policy.Action {
 			case PolicyActionDeny:
-				// Deny action - mark as not allowed and record violations
+			// Deny action - only mark as not allowed if there are violations
+			if len(policyResult.Violations) > 0 {
 				result.Allowed = false
 				result.Violations = append(result.Violations, policyResult.Violations...)
+			}
 
 			case PolicyActionAllow:
 				// Allow action - explicitly allowed (overrides default deny)
@@ -159,6 +161,9 @@ func (e *Engine) Evaluate(ctx PolicyContext, spec WorkloadSpec) (*EvaluationResu
 
 // AddPolicy adds or updates a policy
 func (e *Engine) AddPolicy(policy *Policy) error {
+	if policy == nil {
+		return fmt.Errorf("policy is nil")
+	}
 	if policy.Name == "" {
 		return fmt.Errorf("policy name is required")
 	}
@@ -272,17 +277,19 @@ func (e *Engine) evaluatePolicy(policy *Policy, spec WorkloadSpec) *policyEvalRe
 			continue
 		}
 
+		// Mark as matched when any rule is evaluated
+		result.Matched = true
+
 		// Evaluate rule based on type
 		ruleViolations := e.evaluator.EvaluateRule(rule, spec)
 
 		if len(ruleViolations) > 0 {
-			result.Matched = true
 			result.Violations = append(result.Violations, ruleViolations...)
 		}
 	}
 
 	if result.Matched {
-		result.Message = fmt.Sprintf("Policy %s matched with %d violation(s)", policy.Name, len(result.Violations))
+		result.Message = fmt.Sprintf("Policy %s evaluated with %d violation(s)", policy.Name, len(result.Violations))
 	}
 
 	return result
