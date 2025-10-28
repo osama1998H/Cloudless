@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudless/cloudless/pkg/api"
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/cloudless/cloudless/pkg/policy"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -49,7 +50,7 @@ func (c *Coordinator) AdmitWorkload(ctx context.Context, workload *api.Workload)
 		zap.Duration("evaluation_time", result.EvaluationTime),
 	)
 
-	// Log policy enforcement (event recording removed for simplicity)
+	// CLD-REQ-071: Record policy enforcement events
 	if result.Allowed {
 		c.logger.Debug("Policy enforcement: workload admitted",
 			zap.String("workload", workload.Name),
@@ -61,6 +62,27 @@ func (c *Coordinator) AdmitWorkload(ctx context.Context, workload *api.Workload)
 			zap.String("reason", result.Reason),
 			zap.Int("violations", len(result.Violations)),
 		)
+
+		// Record policy violation event
+		if c.eventStream != nil {
+			// Determine actor ID (user or system)
+			actorID := "user" // Default, could be extracted from context
+
+			// Get primary policy name if available
+			policyName := "admission_control"
+			if len(result.MatchedPolicies) > 0 {
+				policyName = result.MatchedPolicies[0]
+			}
+
+			event := observability.NewPolicyViolationEvent(
+				actorID,
+				"workload",
+				workload.Id,
+				policyName,
+				result.Reason,
+			)
+			c.eventStream.RecordEvent(ctx, event)
+		}
 	}
 
 	// Deny if not allowed

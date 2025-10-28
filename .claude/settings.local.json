@@ -36,7 +36,9 @@
       "Bash(go tool cover:*)",
       "Bash(awk:*)",
       "Bash(docker-compose:*)",
-      "Bash(make build-linux-amd64:*)"
+      "Bash(make build-linux-amd64:*)",
+      "Bash(make build-coordinator:*)",
+      "Bash(make build-cli:*)"
     ],
     "deny": [],
     "ask": []

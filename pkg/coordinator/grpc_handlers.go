@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudless/cloudless/pkg/api"
 	"github.com/cloudless/cloudless/pkg/coordinator/membership"
+	"github.com/cloudless/cloudless/pkg/observability"
 	"github.com/cloudless/cloudless/pkg/scheduler"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -52,6 +53,12 @@ func (c *Coordinator) EnrollNode(ctx context.Context, req *api.EnrollNodeRequest
 		zap.String("node_id", response.NodeId),
 		zap.String("node_name", req.NodeName),
 	)
+
+	// CLD-REQ-071: Record node enrolled event
+	if c.eventStream != nil {
+		event := observability.NewNodeEnrolledEvent(response.NodeId, req.Region, req.Zone)
+		c.eventStream.RecordEvent(ctx, event)
+	}
 
 	return response, nil
 }
@@ -423,6 +430,12 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 		return nil, fmt.Errorf("failed to save workload state: %w", err)
 	}
 
+	// CLD-REQ-071: Record workload created event
+	if c.eventStream != nil {
+		event := observability.NewWorkloadCreatedEvent(workloadID, workload.Namespace, spec.Image, spec.Replicas)
+		c.eventStream.RecordEvent(ctx, event)
+	}
+
 	// Update status to scheduling
 	workloadState.Status = WorkloadStatusScheduling
 	if err := c.workloadStateMgr.SaveWorkload(ctx, workloadState); err != nil {
@@ -449,6 +462,27 @@ func (c *Coordinator) CreateWorkload(ctx context.Context, req *api.CreateWorkloa
 			zap.String("workload_id", workloadID),
 			zap.Error(err),
 		)
+
+		// CLD-REQ-071: Record placement failed event
+		if c.eventStream != nil {
+			event := observability.Event{
+				Type:         observability.EventPlacementFailed,
+				Severity:     observability.SeverityError,
+				ActorType:    "system",
+				ActorID:      "scheduler",
+				ResourceType: "workload",
+				ResourceID:   workloadID,
+				Action:       "schedule",
+				Description:  fmt.Sprintf("Failed to place workload %s: %v", workloadID, err),
+				Metadata: map[string]interface{}{
+					"namespace": workload.Namespace,
+					"reason":    err.Error(),
+				},
+				Success: false,
+				Error:   err.Error(),
+			}
+			c.eventStream.RecordEvent(ctx, event)
+		}
 
 		// Update state to failed
 		workloadState.Status = WorkloadStatusFailed
@@ -700,6 +734,26 @@ func (c *Coordinator) DeleteWorkload(ctx context.Context, req *api.DeleteWorkloa
 		zap.String("workload_id", req.WorkloadId),
 		zap.Int("replicas_to_stop", len(workloadState.Replicas)),
 	)
+
+	// CLD-REQ-071: Record workload deleted event
+	if c.eventStream != nil {
+		event := observability.Event{
+			Type:         observability.EventWorkloadDeleted,
+			Severity:     observability.SeverityInfo,
+			ActorType:    "user",
+			ResourceType: "workload",
+			ResourceID:   req.WorkloadId,
+			Action:       "delete",
+			Description:  fmt.Sprintf("Workload %s deletion initiated", req.WorkloadId),
+			Metadata: map[string]interface{}{
+				"namespace":      workloadState.Namespace,
+				"replicas_count": len(workloadState.Replicas),
+				"graceful":       req.Graceful,
+			},
+			Success: true,
+		}
+		c.eventStream.RecordEvent(ctx, event)
+	}
 
 	// If graceful deletion requested, wait for cleanup
 	// Otherwise, purge immediately

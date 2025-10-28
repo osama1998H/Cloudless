@@ -700,6 +700,19 @@ func (c *Coordinator) ScheduleWorkload(ctx context.Context, spec scheduler.Workl
 		zap.Int("replicas", len(result.Decisions)),
 	)
 
+	// CLD-REQ-071: Record scheduling decision events
+	if c.eventStream != nil {
+		for _, decision := range result.Decisions {
+			event := observability.NewSchedulingDecisionEvent(
+				spec.ID,
+				decision.NodeID,
+				decision.Score,
+				true, // success
+			)
+			c.eventStream.RecordEvent(ctx, event)
+		}
+	}
+
 	return result.Decisions, nil
 }
 
