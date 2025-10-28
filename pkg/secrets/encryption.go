@@ -55,12 +55,16 @@ func (e *EnvelopeEncryptor) Encrypt(plaintext []byte) ([]byte, []byte, []byte, e
 	}
 
 	// Encrypt the data key with the master key
-	encryptedDataKey, _, err := e.encryptWithKey(dataKey, e.masterKey.Key)
+	encryptedDataKey, dataKeyNonce, err := e.encryptWithKey(dataKey, e.masterKey.Key)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to encrypt data key: %w", err)
 	}
 
-	return encryptedData, encryptedDataKey, nonce, nil
+	// Prepend the nonce to the encrypted data key for storage
+	// This allows us to decrypt the data key later without storing the nonce separately
+	encryptedDataKeyWithNonce := append(dataKeyNonce, encryptedDataKey...)
+
+	return encryptedData, encryptedDataKeyWithNonce, nonce, nil
 }
 
 // Decrypt decrypts data using envelope encryption
@@ -75,8 +79,18 @@ func (e *EnvelopeEncryptor) Decrypt(encryptedData, encryptedDataKey, nonce []byt
 		return nil, fmt.Errorf("invalid nonce size: expected %d, got %d", NonceSize, len(nonce))
 	}
 
+	// Extract the nonce from the beginning of the encrypted data key
+	// The encrypted data key format is: [nonce (12 bytes)][encrypted key]
+	if len(encryptedDataKey) < NonceSize {
+		return nil, fmt.Errorf("encrypted data key too short: expected at least %d bytes, got %d",
+			NonceSize, len(encryptedDataKey))
+	}
+
+	dataKeyNonce := encryptedDataKey[:NonceSize]
+	encryptedKey := encryptedDataKey[NonceSize:]
+
 	// Decrypt the data key with the master key
-	dataKey, err := e.decryptWithKey(encryptedDataKey, e.masterKey.Key, make([]byte, NonceSize))
+	dataKey, err := e.decryptWithKey(encryptedKey, e.masterKey.Key, dataKeyNonce)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt data key: %w", err)
 	}
@@ -181,30 +195,31 @@ func RotateMasterKey(oldKey *MasterKey) (*MasterKey, error) {
 
 // ReEncryptWithNewKey re-encrypts data with a new master key
 // This is used during master key rotation
-func ReEncryptWithNewKey(encryptedData, encryptedDataKey, nonce []byte, oldKey, newKey *MasterKey) ([]byte, []byte, error) {
+// Returns: newEncryptedData, newEncryptedDataKey, newNonce, error
+func ReEncryptWithNewKey(encryptedData, encryptedDataKey, nonce []byte, oldKey, newKey *MasterKey) ([]byte, []byte, []byte, error) {
 	// Decrypt with old key
 	oldEncryptor, err := NewEnvelopeEncryptor(oldKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create old encryptor: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create old encryptor: %w", err)
 	}
 
 	plaintext, err := oldEncryptor.Decrypt(encryptedData, encryptedDataKey, nonce)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decrypt with old key: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to decrypt with old key: %w", err)
 	}
 
 	// Encrypt with new key
 	newEncryptor, err := NewEnvelopeEncryptor(newKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create new encryptor: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create new encryptor: %w", err)
 	}
 
-	newEncryptedData, newEncryptedDataKey, _, err := newEncryptor.Encrypt(plaintext)
+	newEncryptedData, newEncryptedDataKey, newNonce, err := newEncryptor.Encrypt(plaintext)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to encrypt with new key: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to encrypt with new key: %w", err)
 	}
 
-	return newEncryptedData, newEncryptedDataKey, nil
+	return newEncryptedData, newEncryptedDataKey, newNonce, nil
 }
 
 // ValidateMasterKey validates a master key

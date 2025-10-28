@@ -264,6 +264,36 @@ message WorkloadSpec {
   HealthCheck readiness_probe = 13;
   repeated string image_pull_secrets = 14;
   SecurityContext security_context = 15;
+
+  // CLD-REQ-063: Secrets Management
+  repeated SecretEnvSource secret_env = 16;  // Inject secrets as environment variables
+  repeated SecretVolumeSource secret_volumes = 17;  // Mount secrets as files
+}
+
+// SecretEnvSource defines how to inject secrets as environment variables (CLD-REQ-063)
+message SecretEnvSource {
+  string secret_name = 1;  // Name of the secret in the secrets service
+  string namespace = 2;    // Namespace of the secret (defaults to workload namespace)
+  string audience = 3;     // Audience claim for access control
+
+  // Optional: Map specific secret keys to environment variable names
+  // If empty, all keys in the secret are exposed with their original names
+  map<string, string> key_to_env = 4;  // secret_key -> ENV_VAR_NAME
+}
+
+// SecretVolumeSource defines how to mount secrets as files (CLD-REQ-063)
+message SecretVolumeSource {
+  string secret_name = 1;  // Name of the secret in the secrets service
+  string namespace = 2;    // Namespace of the secret (defaults to workload namespace)
+  string audience = 3;     // Audience claim for access control
+  string mount_path = 4;   // Path where secret files should be mounted
+
+  // Optional: Map specific secret keys to file names
+  // If empty, all keys are mounted as files with their original names
+  map<string, string> key_to_file = 5;  // secret_key -> filename
+
+  // Optional: File mode for mounted secret files (default: 0400 read-only)
+  int32 mode = 6;
 }
 
 // ResourceRequirements defines resource needs

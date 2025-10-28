@@ -1,0 +1,109 @@
+# CLD-REQ-063: Example workload with secrets management
+# This workload demonstrates how to inject secrets into containers
+# as environment variables and volume mounts
+
+apiVersion: cloudless.io/v1
+kind: Workload
+metadata:
+  name: secure-app
+  namespace: default
+spec:
+  # Container configuration
+  image: nginx:alpine
+  replicas: 2
+
+  # Resource requirements
+  resources:
+    cpu:
+      min: 100m
+      max: 500m
+    memory:
+      min: 64Mi
+      max: 256Mi
+
+  # Regular environment variables
+  env:
+    APP_ENV: production
+    LOG_LEVEL: info
+
+  # CLD-REQ-063: Secret injection as environment variables
+  # The secret "db-credentials" should be created beforehand using:
+  #   cloudlessctl secrets create db-credentials \
+  #     --namespace=default \
+  #     --data=DB_HOST=postgres.example.com \
+  #     --data=DB_PORT=5432 \
+  #     --data=DB_NAME=myapp \
+  #     --data=DB_USER=app_user \
+  #     --data=DB_PASSWORD=super-secure-password \
+  #     --audience=secure-app
+  secret_env:
+    - secret_name: db-credentials
+      namespace: default
+      audience: secure-app
+      # Map secret keys to environment variables
+      key_to_env:
+        DB_HOST: DATABASE_HOST
+        DB_PORT: DATABASE_PORT
+        DB_NAME: DATABASE_NAME
+        DB_USER: DATABASE_USER
+        DB_PASSWORD: DATABASE_PASSWORD
+
+  # CLD-REQ-063: Secret injection as volume mounts
+  # The secret "tls-certificates" should be created beforehand using:
+  #   cloudlessctl secrets create tls-certificates \
+  #     --namespace=default \
+  #     --file=tls.crt=/path/to/cert.pem \
+  #     --file=tls.key=/path/to/key.pem \
+  #     --audience=secure-app
+  secret_volumes:
+    - secret_name: tls-certificates
+      namespace: default
+      audience: secure-app
+      mount_path: /etc/nginx/ssl
+      # Files will be mounted as /etc/nginx/ssl/tls.crt and /etc/nginx/ssl/tls.key
+      mode: 0400  # Read-only
+
+    # Example: Mount all keys from a secret with original names
+    - secret_name: app-config
+      namespace: default
+      audience: secure-app
+      mount_path: /etc/app/config
+      mode: 0444  # Read-only for all users
+
+  # Placement policy
+  placement:
+    affinity:
+      node_labels:
+        zone: production
+    anti_affinity:
+      workload_labels:
+        app: secure-app
+
+  # Restart policy
+  restart_policy: Always
+
+  # Health checks
+  liveness_probe:
+    http_get:
+      path: /health
+      port: 80
+    initial_delay_seconds: 10
+    period_seconds: 30
+
+  readiness_probe:
+    http_get:
+      path: /ready
+      port: 80
+    initial_delay_seconds: 5
+    period_seconds: 10
+
+  # Security context (CLD-REQ-062)
+  security_context:
+    run_as_non_root: true
+    run_as_user: 101
+    read_only_root_filesystem: true
+    capabilities_drop:
+      - ALL
+    linux:
+      seccomp_profile:
+        type: RuntimeDefault

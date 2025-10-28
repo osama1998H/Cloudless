@@ -230,7 +230,7 @@ All requirements have IDs for traceability.
 
 ## 23. Implementation Notes (Go)
 
-* Go 1.23+. Modules: `/cmd/agent`, `/cmd/coordinator`, `/pkg/api` (protobuf/gRPC), `/pkg/scheduler`, `/pkg/overlay`, `/pkg/storage`, `/pkg/policy`, `/pkg/raft`, `/pkg/observability`.
+* Go 1.24+. Modules: `/cmd/agent`, `/cmd/coordinator`, `/pkg/api` (protobuf/gRPC), `/pkg/scheduler`, `/pkg/overlay`, `/pkg/storage`, `/pkg/policy`, `/pkg/raft`, `/pkg/observability`.
 * Build: static binaries, CGO disabled when possible.
 * Cross‑compile for linux/amd64 and linux/arm64.
 

@@ -34,7 +34,9 @@
       "Bash(GOOS=linux GOARCH=amd64 go build:*)",
       "Bash(./build/cloudlessctl workload create:*)",
       "Bash(go tool cover:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(docker-compose:*)",
+      "Bash(make build-linux-amd64:*)"
     ],
     "deny": [],
     "ask": []

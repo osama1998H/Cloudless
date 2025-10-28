@@ -110,6 +110,7 @@ type Agent struct {
 	resourceMonitor *ResourceMonitor
 	metricsStorage  *MetricsStorage
 	coordinatorConn *grpc.ClientConn
+	secretsClient   *SecretsClient // CLD-REQ-063: Secrets management client
 
 	// CLD-REQ-032: Container health tracking for heartbeat reporting
 	containerHealthMu sync.RWMutex
@@ -502,6 +503,12 @@ func (a *Agent) Stop(ctx context.Context) error {
 		}
 	}
 
+	// CLD-REQ-063: Stop secrets client
+	if a.secretsClient != nil {
+		a.secretsClient.Stop()
+		a.logger.Info("Secrets client stopped")
+	}
+
 	// Disconnect from coordinator
 	if a.coordinatorConn != nil {
 		if err := a.coordinatorConn.Close(); err != nil {
@@ -578,6 +585,11 @@ func (a *Agent) connectToCoordinator(ctx context.Context) error {
 	// Create coordinator client
 	// Note: Once protobuf is generated, replace with:
 	// a.coordinatorClient = api.NewCoordinatorServiceClient(conn)
+
+	// CLD-REQ-063: Initialize secrets client
+	secretsServiceClient := api.NewSecretsServiceClient(conn)
+	a.secretsClient = NewSecretsClient(secretsServiceClient, a.logger)
+	a.logger.Info("Secrets client initialized")
 
 	// Perform enrollment if we have a join token
 	if a.config.JoinToken != "" {
@@ -1533,6 +1545,11 @@ func (a *Agent) GetRuntime() runtime.Runtime {
 // GetResourceMonitor returns the resource monitor
 func (a *Agent) GetResourceMonitor() *ResourceMonitor {
 	return a.resourceMonitor
+}
+
+// GetSecretsClient returns the secrets client (CLD-REQ-063)
+func (a *Agent) GetSecretsClient() *SecretsClient {
+	return a.secretsClient
 }
 
 // Overlay Networking Methods

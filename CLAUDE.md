@@ -332,6 +332,226 @@ security_context:
 **Graceful Degradation**:
 All security features detect platform availability and log warnings rather than failing when features are unavailable. This allows development on macOS/Windows while enforcing security in production Linux environments.
 
+### Secrets Management (CLD-REQ-063)
+
+Cloudless implements enterprise-grade secrets management for secure storage and distribution of sensitive configuration data.
+
+**Architecture**:
+
+```
+Coordinator (SecretsService)
+    │
+    ├── Envelope Encryption (AES-256-GCM)
+    │   ├── Master Encryption Key (MEK) - 32 bytes
+    │   └── Data Encryption Keys (DEK) - unique per secret
+    │
+    ├── Access Control
+    │   ├── Audience-based restrictions
+    │   └── Short-lived JWT access tokens
+    │
+    ├── Storage (BoltDB)
+    │   ├── secrets/ - Encrypted secret data
+    │   ├── tokens/ - Access token metadata
+    │   └── audit/ - Audit log entries
+    │
+    └── Audit Logging
+        └── All operations tracked (CREATE, ACCESS, UPDATE, DELETE)
+            │
+            ▼
+    Agent (Secrets Cache)
+        │
+        ├── In-memory cache with TTL
+        ├── Cache invalidation on updates
+        └── Workload secret injection
+            │
+            ▼
+    Workload Containers
+        ├── Environment variables
+        └── Mounted files (tmpfs)
+```
+
+**Core Features**:
+
+1. **Envelope Encryption**
+   - Master Key (MEK) encrypts Data Encryption Keys (DEK)
+   - Each secret has unique DEK
+   - Fast key rotation (only re-encrypt DEKs, not data)
+   - Algorithm: AES-256-GCM with authenticated encryption
+
+2. **Audience-Based Access Control**
+   - Secrets declare allowed audiences at creation
+   - Access tokens must match audience
+   - Example: `["backend-api", "worker-pool"]`
+   - Prevents cross-workload secret access
+
+3. **Short-Lived Access Tokens**
+   - JWT tokens with configurable TTL (default 1h, max 24h)
+   - Usage limits (max_uses per token)
+   - Automatic revocation on exhaustion/expiration
+   - Signed with HMAC-SHA256
+
+4. **Audit Logging**
+   - All operations logged (CREATE, ACCESS, UPDATE, DELETE, GENERATE_TOKEN)
+   - Tracks actor, timestamp, IP address, metadata
+   - 90-day retention (configurable)
+   - Compliance support (SOC 2, GDPR, HIPAA, PCI-DSS)
+
+5. **Immutable Secrets**
+   - Prevents updates to sensitive configs (TLS certs, signing keys)
+   - Update attempts rejected with FailedPrecondition error
+
+**gRPC API** (10 methods in `pkg/api/cloudless.proto`):
+
+```protobuf
+service SecretsService {
+  // Lifecycle
+  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc UpdateSecret(UpdateSecretRequest) returns (UpdateSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
+
+  // Access control
+  rpc GenerateAccessToken(GenerateAccessTokenRequest) returns (GenerateAccessTokenResponse);
+  rpc RevokeAccessToken(RevokeAccessTokenRequest) returns (RevokeAccessTokenResponse);
+
+  // Management
+  rpc GetSecretAuditLog(GetSecretAuditLogRequest) returns (GetSecretAuditLogResponse);
+  rpc GetMasterKeyInfo(GetMasterKeyInfoRequest) returns (GetMasterKeyInfoResponse);
+  rpc RotateMasterKey(RotateMasterKeyRequest) returns (RotateMasterKeyResponse);
+}
+```
+
+**Usage Example**:
+
+```yaml
+# Create secret via CLI
+cloudlessctl secrets create production/postgres-creds \
+  --data DB_HOST=postgres.prod.internal \
+  --data DB_USER=app_user \
+  --data DB_PASSWORD=secretPassword123 \
+  --audience backend-api \
+  --audience worker-pool \
+  --ttl 90d
+
+# Generate access token
+TOKEN=$(cloudlessctl secrets token production/postgres-creds \
+  --audience backend-api \
+  --ttl 1h \
+  --max-uses 100)
+
+# Workload spec (runtime injection)
+apiVersion: cloudless.dev/v1
+kind: Workload
+metadata:
+  name: backend-api
+spec:
+  containers:
+  - name: app
+    image: myapp:v1.0
+    env:
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          namespace: production
+          name: postgres-creds
+          key: DB_PASSWORD
+          audience: backend-api
+```
+
+**Agent-Side Caching**:
+
+Agents cache decrypted secrets in memory to reduce coordinator load:
+- Cache key: `namespace/name`
+- TTL: min(token_ttl, secret_ttl)
+- Invalidation: Coordinator broadcasts updates
+- Storage: Memory only (never persisted to disk)
+
+**Security Model**:
+
+| **Threat** | **Mitigation** |
+|------------|---------------|
+| Secret exposure in logs | Never log plaintext, only metadata |
+| Stolen access token | Short TTL (1h), usage limits, audience restriction |
+| Compromised agent | Secrets cached with TTL, deleted on expiration |
+| Network eavesdropping | mTLS for all coordinator-agent communication |
+| Master key compromise | Key rotation (90-day interval), audit forensics |
+| Privilege escalation | Audience-based access control, no wildcards |
+
+**Configuration** (docker-compose.yml):
+
+```yaml
+coordinator:
+  environment:
+    # Enable secrets management
+    - CLOUDLESS_SECRETS_ENABLED=true
+
+    # Keys (base64-encoded, 32 bytes)
+    # WARNING: Generate unique keys per deployment!
+    # Use: scripts/generate-secrets-keys.sh
+    - CLOUDLESS_SECRETS_MASTER_KEY=bqgAnIrXVpBU0cByc5mBvK+ELHNiyPp0A+d+kMkoKv0=
+    - CLOUDLESS_SECRETS_MASTER_KEY_ID=dev-master-key-001
+    - CLOUDLESS_SECRETS_TOKEN_SIGNING_KEY=85yjkBGBhaBxlboSdzcFIlF6uhUYqiwB5sv2qfDXU2A=
+
+    # Token TTL (1 hour default)
+    - CLOUDLESS_SECRETS_TOKEN_TTL=1h
+
+    # Automatic key rotation (recommended in production)
+    - CLOUDLESS_SECRETS_ROTATION_ENABLED=false  # Dev: disabled
+    - CLOUDLESS_SECRETS_ROTATION_INTERVAL=2160h  # Prod: 90 days
+```
+
+**Key Files**:
+- `pkg/secrets/manager.go` - Core secrets manager
+- `pkg/secrets/encryption.go` - Envelope encryption logic
+- `pkg/secrets/store.go` - BoltDB storage layer
+- `pkg/secrets/tokens.go` - JWT access token management
+- `pkg/secrets/audit.go` - Audit logging
+- `pkg/api/secrets_service.go` - gRPC service implementation
+- `pkg/runtime/secrets.go` - Runtime secret injection
+- `scripts/generate-secrets-keys.sh` - Key generation utility
+- `docs/design/CLD-REQ-063-SECRETS.md` - Comprehensive design doc
+- `test/manual/secrets_demo.go` - Manual test program (10 test steps)
+- `examples/workloads/secure-app.yaml` - Example workload with secrets
+
+**Testing**:
+```bash
+# Unit tests (9 tests passing)
+go test ./pkg/secrets -v
+
+# Manual test (requires running cluster)
+make compose-up
+go run test/manual/secrets_demo.go --coordinator=localhost:8080
+
+# Integration tests (planned)
+go test -tags=integration ./test/integration/secrets_test.go
+```
+
+**Performance Targets**:
+- CreateSecret: 200µs P50, 500µs P95
+- GetSecret (cache hit): 50µs P50, 100µs P95
+- GetSecret (cache miss): 180µs P50, 400µs P95
+- GenerateAccessToken: 50µs P50, 100µs P95
+- Coordinator throughput: 5,000+ requests/sec
+
+**Production Best Practices**:
+1. ✅ Generate unique master keys (never use dev keys)
+2. ✅ Enable TLS/mTLS for all communication
+3. ✅ Set short token TTL (1h recommended, max 24h)
+4. ✅ Enable automatic key rotation (90-day interval)
+5. ✅ Monitor audit logs for suspicious activity
+6. ✅ Use mounted files (not environment variables) for injection
+7. ✅ Store master keys in external secret manager (Vault, AWS Secrets Manager)
+8. ❌ Never commit keys to version control
+9. ❌ Never disable TLS in production
+10. ❌ Never grant wildcard audience permissions
+
+**Documentation**:
+- Full design: `docs/design/CLD-REQ-063-SECRETS.md` (900+ lines)
+- API reference: `pkg/api/cloudless.proto` (SecretsService)
+- Examples: `examples/workloads/secure-app.yaml`
+- Key generation: `scripts/generate-secrets-keys.sh`
+
 ## Observability Stack
 
 ### Loki Log Aggregation

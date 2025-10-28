@@ -17,6 +17,7 @@ import (
 	"github.com/cloudless/cloudless/pkg/policy"
 	"github.com/cloudless/cloudless/pkg/raft"
 	"github.com/cloudless/cloudless/pkg/scheduler"
+	"github.com/cloudless/cloudless/pkg/secrets"
 	hashicorpraft "github.com/hashicorp/raft"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -46,6 +47,15 @@ type Config struct {
 	TokenSecret      []byte        // Secret for signing enrollment tokens
 	TokenExpiry      time.Duration // Token expiry duration
 	CertificatesPath string        // Path to TLS certificates
+
+	// Secrets management configuration
+	SecretsEnabled         bool          // Enable secrets management service
+	SecretsMasterKey       []byte        // Master encryption key for secrets (32 bytes for AES-256)
+	SecretsMasterKeyID     string        // Master key identifier
+	SecretsTokenSigningKey []byte        // Signing key for secret access tokens
+	SecretsTokenTTL        time.Duration // TTL for secret access tokens
+	SecretsRotationEnabled bool          // Enable automatic master key rotation
+	SecretsRotationInterval time.Duration // Rotation interval
 }
 
 // Validate validates the coordinator configuration
@@ -91,6 +101,30 @@ func (c *Config) Validate() error {
 	if c.CertificatesPath == "" {
 		c.CertificatesPath = filepath.Join(c.DataDir, "certs")
 	}
+
+	// Secrets management defaults
+	if c.SecretsEnabled {
+		if len(c.SecretsMasterKey) > 0 && len(c.SecretsMasterKey) != 32 {
+			return fmt.Errorf("secrets master key must be exactly 32 bytes for AES-256, got %d", len(c.SecretsMasterKey))
+		}
+		if c.SecretsMasterKeyID == "" {
+			c.SecretsMasterKeyID = "default-master-key"
+		}
+		if len(c.SecretsTokenSigningKey) == 0 {
+			// Use same key as enrollment tokens for simplicity
+			c.SecretsTokenSigningKey = c.TokenSecret
+		}
+		if len(c.SecretsTokenSigningKey) < 32 {
+			return fmt.Errorf("secrets token signing key must be at least 32 bytes, got %d", len(c.SecretsTokenSigningKey))
+		}
+		if c.SecretsTokenTTL == 0 {
+			c.SecretsTokenTTL = 15 * time.Minute // Short-lived tokens by default
+		}
+		if c.SecretsRotationInterval == 0 {
+			c.SecretsRotationInterval = 90 * 24 * time.Hour // 90 days
+		}
+	}
+
 	return nil
 }
 
@@ -113,6 +147,7 @@ type Coordinator struct {
 	replicaMonitor   *ReplicaMonitor // CLD-REQ-031: Automatic failed replica rescheduling
 	policyEngine     policy.PolicyEngine
 	eventStream      *observability.EventStream
+	secretsManager   *secrets.Manager // CLD-REQ-063: Secrets management service
 
 	// Overlay networking components
 	transport       *overlay.QUICTransport
@@ -277,6 +312,66 @@ func New(config *Config) (*Coordinator, error) {
 		return nil, fmt.Errorf("failed to initialize replica monitor: %w", err)
 	}
 	c.replicaMonitor = replicaMonitor
+
+	// Initialize Secrets Manager (CLD-REQ-063)
+	if config.SecretsEnabled {
+		config.Logger.Info("Initializing Secrets Manager")
+
+		// Create secrets directory
+		secretsDir := filepath.Join(config.DataDir, "secrets")
+		if err := os.MkdirAll(secretsDir, 0700); err != nil { // 0700 for sensitive data
+			return nil, fmt.Errorf("failed to create secrets directory: %w", err)
+		}
+
+		// Generate or load master key
+		var masterKey []byte
+		if len(config.SecretsMasterKey) == 32 {
+			masterKey = config.SecretsMasterKey
+		} else {
+			// Generate a new master key
+			generatedKey, err := secrets.GenerateMasterKey()
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate master key: %w", err)
+			}
+			masterKey = generatedKey.Key
+			config.Logger.Warn("Generated new master key for secrets - MUST persist this for production",
+				zap.String("key_id", generatedKey.ID),
+			)
+		}
+
+		// Create secrets manager configuration
+		secretsConfig := secrets.ManagerConfig{
+			MasterKeyID:         config.SecretsMasterKeyID,
+			MasterKey:           masterKey,
+			EnableAutoRotation:  config.SecretsRotationEnabled,
+			RotationInterval:    config.SecretsRotationInterval,
+			TokenTTL:            config.SecretsTokenTTL,
+			TokenSigningKey:     config.SecretsTokenSigningKey,
+			MaxTokenUsesDefault: 1, // Single-use tokens by default
+			DataDir:             secretsDir,
+			EnableAuditLog:      true,
+			AuditRetention:      90 * 24 * time.Hour,
+		}
+
+		// Create RAFT-backed secret store
+		secretStore, err := secrets.NewRaftSecretStore(raftStore, config.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create secret store: %w", err)
+		}
+
+		// Initialize secrets manager
+		secretsManager, err := secrets.NewManager(secretsConfig, secretStore, config.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize secrets manager: %w", err)
+		}
+		c.secretsManager = secretsManager
+
+		config.Logger.Info("Secrets Manager initialized",
+			zap.String("master_key_id", config.SecretsMasterKeyID),
+			zap.Duration("token_ttl", config.SecretsTokenTTL),
+			zap.Bool("auto_rotation", config.SecretsRotationEnabled),
+		)
+	}
 
 	// Initialize Overlay Networking Components
 	config.Logger.Info("Initializing Overlay Networking")
@@ -522,6 +617,13 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 func (c *Coordinator) RegisterServices(server *grpc.Server) {
 	api.RegisterCoordinatorServiceServer(server, c)
 	c.logger.Info("Registered CoordinatorService gRPC handlers")
+
+	// Register SecretsService if enabled (CLD-REQ-063)
+	if c.secretsManager != nil {
+		secretsService := NewSecretsServiceServer(c)
+		api.RegisterSecretsServiceServer(server, secretsService)
+		c.logger.Info("Registered SecretsService gRPC handlers")
+	}
 }
 
 // GetMembershipManager returns the membership manager
@@ -542,6 +644,11 @@ func (c *Coordinator) GetCA() *mtls.CA {
 // GetTokenManager returns the token manager
 func (c *Coordinator) GetTokenManager() *mtls.TokenManager {
 	return c.tokenManager
+}
+
+// GetSecretsManager returns the secrets manager (CLD-REQ-063)
+func (c *Coordinator) GetSecretsManager() *secrets.Manager {
+	return c.secretsManager
 }
 
 // IsLeader returns whether this coordinator is the RAFT leader

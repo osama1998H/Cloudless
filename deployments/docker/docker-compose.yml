@@ -30,6 +30,18 @@ services:
       - CLOUDLESS_DATA_DIR=/data
       - CLOUDLESS_BOOTSTRAP=true
       - CLOUDLESS_TOKEN_SECRET=dev-secret-fixed-key-for-testing
+      - CLOUDLESS_TLS_ENABLED=false  # Disable TLS for local testing
+      # CLD-REQ-063: Secrets Management Configuration
+      # SECURITY WARNING: These are DEVELOPMENT keys only!
+      # NEVER use these in production - generate unique keys per deployment
+      # Generate production keys with: scripts/generate-secrets-keys.sh
+      - CLOUDLESS_SECRETS_ENABLED=true
+      - CLOUDLESS_SECRETS_MASTER_KEY=${CLOUDLESS_SECRETS_MASTER_KEY:-bqgAnIrXVpBU0cByc5mBvK+ELHNiyPp0A+d+kMkoKv0=}  # 32-byte AES-256 key (base64)
+      - CLOUDLESS_SECRETS_MASTER_KEY_ID=${CLOUDLESS_SECRETS_MASTER_KEY_ID:-dev-master-key-001}
+      - CLOUDLESS_SECRETS_TOKEN_SIGNING_KEY=${CLOUDLESS_SECRETS_TOKEN_SIGNING_KEY:-85yjkBGBhaBxlboSdzcFIlF6uhUYqiwB5sv2qfDXU2A=}  # 32-byte signing key (base64)
+      - CLOUDLESS_SECRETS_TOKEN_TTL=1h
+      - CLOUDLESS_SECRETS_ROTATION_ENABLED=false  # Disable auto-rotation in dev
+      - CLOUDLESS_SECRETS_ROTATION_INTERVAL=2160h  # 90 days (when enabled)
     volumes:
       - coordinator-data:/data
       - ./config/coordinator.yaml:/etc/cloudless/coordinator.yaml:ro

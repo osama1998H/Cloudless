@@ -480,26 +480,248 @@ func (m *Manager) RotateMasterKey() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.logger.Info("Starting master key rotation")
+	m.logger.Info("Starting master key rotation",
+		zap.String("old_key_id", m.masterKey.ID),
+	)
 
 	// Generate new master key
+	oldKey := m.masterKey
 	newKey, err := RotateMasterKey(m.masterKey)
 	if err != nil {
-		return fmt.Errorf("failed to rotate master key: %w", err)
+		return fmt.Errorf("failed to generate new master key: %w", err)
 	}
 
-	// TODO: Re-encrypt all secrets with new key
-	// This would be implemented by iterating through all secrets
-	// and calling ReEncryptWithNewKey for each
+	// Re-encrypt all secrets with the new key
+	// List all secrets from the store
+	allSecrets, err := m.store.List(SecretFilter{})
+	if err != nil {
+		return fmt.Errorf("failed to list secrets for rotation: %w", err)
+	}
 
-	m.masterKey = newKey
-
-	m.logger.Info("Master key rotated successfully",
-		zap.String("old_key_id", m.masterKey.ID),
+	m.logger.Info("Re-encrypting secrets with new master key",
+		zap.Int("total_secrets", len(allSecrets)),
 		zap.String("new_key_id", newKey.ID),
 	)
 
+	// Track progress and failures
+	successCount := 0
+	failedSecrets := make(map[string]error)
+	now := getCurrentTime()
+
+	// Re-encrypt each secret
+	for i, secret := range allSecrets {
+		if secret.DeletedAt != nil {
+			// Skip soft-deleted secrets
+			m.logger.Debug("Skipping deleted secret",
+				zap.String("namespace", secret.Namespace),
+				zap.String("name", secret.Name),
+			)
+			continue
+		}
+
+		// Log progress every 100 secrets
+		if i > 0 && i%100 == 0 {
+			m.logger.Info("Key rotation progress",
+				zap.Int("processed", i),
+				zap.Int("total", len(allSecrets)),
+				zap.Int("successful", successCount),
+				zap.Int("failed", len(failedSecrets)),
+			)
+		}
+
+		// Re-encrypt all data keys in this secret
+		reencryptedData := make(map[string][]byte)
+		for key, encryptedValue := range secret.Data {
+			// Extract nonce from annotations (stored during encryption)
+			nonceKey := fmt.Sprintf("nonce.%s", key)
+			nonceHex, ok := secret.Annotations[nonceKey]
+			if !ok {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("missing nonce for key %s", key)
+				m.logger.Error("Missing nonce during rotation",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.String("key", key),
+				)
+				continue
+			}
+
+			// Decode nonce from hex
+			nonce, err := hex.DecodeString(nonceHex)
+			if err != nil || len(nonce) != NonceSize {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("failed to decode nonce for key %s: invalid hex or wrong size", key)
+				m.logger.Error("Invalid nonce during rotation",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.String("key", key),
+					zap.Int("nonce_size", len(nonce)),
+					zap.Int("expected_size", NonceSize),
+				)
+				continue
+			}
+
+			// Extract encrypted data key from annotations
+			edkKey := fmt.Sprintf("edk.%s", key)
+			edkHex, ok := secret.Annotations[edkKey]
+			if !ok {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("missing encrypted data key for key %s", key)
+				m.logger.Error("Missing encrypted data key during rotation",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.String("key", key),
+				)
+				continue
+			}
+
+			encryptedDataKey, err := hex.DecodeString(edkHex)
+			if err != nil {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("failed to decode encrypted data key for key %s: %w", key, err)
+				m.logger.Error("Invalid encrypted data key during rotation",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.String("key", key),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			// Re-encrypt this value
+			newEncryptedData, newEncryptedDataKey, newNonce, err := ReEncryptWithNewKey(
+				encryptedValue,
+				encryptedDataKey,
+				nonce,
+				oldKey,
+				newKey,
+			)
+			if err != nil {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("failed to re-encrypt key %s: %w", key, err)
+				m.logger.Error("Failed to re-encrypt secret value",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.String("key", key),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			reencryptedData[key] = newEncryptedData
+			// Update encrypted data key and nonce in annotations
+			secret.Annotations[fmt.Sprintf("edk.%s", key)] = fmt.Sprintf("%x", newEncryptedDataKey)
+			secret.Annotations[fmt.Sprintf("nonce.%s", key)] = fmt.Sprintf("%x", newNonce)
+		}
+
+		// If all keys were re-encrypted successfully, update the secret
+		if len(reencryptedData) == len(secret.Data) {
+			secret.Data = reencryptedData
+			secret.KeyID = newKey.ID
+			secret.RotatedAt = &now
+			secret.UpdatedAt = now
+
+			// Save updated secret
+			if err := m.store.Save(secret); err != nil {
+				failedSecrets[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] =
+					fmt.Errorf("failed to save re-encrypted secret: %w", err)
+				m.logger.Error("Failed to save re-encrypted secret",
+					zap.String("namespace", secret.Namespace),
+					zap.String("name", secret.Name),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			successCount++
+			m.logger.Debug("Secret re-encrypted successfully",
+				zap.String("namespace", secret.Namespace),
+				zap.String("name", secret.Name),
+			)
+
+			// Log audit entry
+			m.audit = append(m.audit, SecretAuditEntry{
+				Timestamp: now,
+				Action:    SecretActionRotate,
+				SecretRef: fmt.Sprintf("%s/%s", secret.Namespace, secret.Name),
+				Actor:     "system",
+				Audience:  "master-key-rotation",
+				Success:   true,
+				Reason:    fmt.Sprintf("Re-encrypted with key %s", newKey.ID),
+			})
+		}
+	}
+
+	// Check if rotation was successful
+	if len(failedSecrets) > 0 {
+		m.logger.Error("Master key rotation completed with errors",
+			zap.Int("total_secrets", len(allSecrets)),
+			zap.Int("successful", successCount),
+			zap.Int("failed", len(failedSecrets)),
+		)
+
+		// Log first 10 failures for debugging
+		count := 0
+		for secretRef, err := range failedSecrets {
+			if count >= 10 {
+				break
+			}
+			m.logger.Error("Failed secret rotation",
+				zap.String("secret", secretRef),
+				zap.Error(err),
+			)
+			count++
+		}
+
+		return fmt.Errorf("failed to rotate %d out of %d secrets (see logs for details)",
+			len(failedSecrets), len(allSecrets))
+	}
+
+	// All secrets re-encrypted successfully, activate new master key
+	m.masterKey = newKey
+
+	// Create new encryptor with new master key
+	newEncryptor, err := NewEnvelopeEncryptor(newKey)
+	if err != nil {
+		return fmt.Errorf("failed to create encryptor with new key: %w", err)
+	}
+	m.encryptor = newEncryptor
+
+	m.logger.Info("Master key rotated successfully",
+		zap.String("old_key_id", oldKey.ID),
+		zap.String("new_key_id", newKey.ID),
+		zap.Int("secrets_re_encrypted", successCount),
+	)
+
+	// Log global audit entry for rotation
+	m.audit = append(m.audit, SecretAuditEntry{
+		Timestamp: now,
+		Action:    SecretActionRotate,
+		SecretRef: "all",
+		Actor:     "system",
+		Audience:  "master-key-rotation",
+		Success:   true,
+		Reason:    fmt.Sprintf("Rotated from %s to %s, re-encrypted %d secrets", oldKey.ID, newKey.ID, successCount),
+	})
+
 	return nil
+}
+
+// GetMasterKey returns information about the current master key (CLD-REQ-063)
+// Note: Does not return the actual key material for security reasons
+func (m *Manager) GetMasterKey() *MasterKey {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Return a copy of the master key without the actual key material
+	return &MasterKey{
+		ID:        m.masterKey.ID,
+		Algorithm: m.masterKey.Algorithm,
+		Key:       nil, // Don't expose actual key material
+		Active:    m.masterKey.Active,
+		CreatedAt: m.masterKey.CreatedAt,
+		RotatedAt: m.masterKey.RotatedAt,
+	}
 }
 
 // CleanupExpiredTokens removes expired access tokens

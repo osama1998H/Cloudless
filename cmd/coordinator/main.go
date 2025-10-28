@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,6 +58,15 @@ func init() {
 	rootCmd.PersistentFlags().String("tls-key", "", "TLS key file")
 	rootCmd.PersistentFlags().String("tls-ca", "", "TLS CA certificate file")
 
+	// Secrets management flags (CLD-REQ-063)
+	rootCmd.PersistentFlags().Bool("secrets-enabled", false, "Enable secrets management service")
+	rootCmd.PersistentFlags().String("secrets-master-key", "", "Base64-encoded master encryption key (32 bytes)")
+	rootCmd.PersistentFlags().String("secrets-master-key-id", "", "Master key identifier")
+	rootCmd.PersistentFlags().String("secrets-token-signing-key", "", "Base64-encoded JWT signing key")
+	rootCmd.PersistentFlags().Duration("secrets-token-ttl", 1*time.Hour, "Default TTL for secret access tokens")
+	rootCmd.PersistentFlags().Bool("secrets-rotation-enabled", false, "Enable automatic master key rotation")
+	rootCmd.PersistentFlags().Duration("secrets-rotation-interval", 90*24*time.Hour, "Master key rotation interval")
+
 	// Bind flags to viper
 	viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config"))
 	viper.BindPFlag("data_dir", rootCmd.PersistentFlags().Lookup("data-dir"))
@@ -69,9 +80,17 @@ func init() {
 	viper.BindPFlag("tls.cert", rootCmd.PersistentFlags().Lookup("tls-cert"))
 	viper.BindPFlag("tls.key", rootCmd.PersistentFlags().Lookup("tls-key"))
 	viper.BindPFlag("tls.ca", rootCmd.PersistentFlags().Lookup("tls-ca"))
+	viper.BindPFlag("secrets.enabled", rootCmd.PersistentFlags().Lookup("secrets-enabled"))
+	viper.BindPFlag("secrets.master_key", rootCmd.PersistentFlags().Lookup("secrets-master-key"))
+	viper.BindPFlag("secrets.master_key_id", rootCmd.PersistentFlags().Lookup("secrets-master-key-id"))
+	viper.BindPFlag("secrets.token_signing_key", rootCmd.PersistentFlags().Lookup("secrets-token-signing-key"))
+	viper.BindPFlag("secrets.token_ttl", rootCmd.PersistentFlags().Lookup("secrets-token-ttl"))
+	viper.BindPFlag("secrets.rotation_enabled", rootCmd.PersistentFlags().Lookup("secrets-rotation-enabled"))
+	viper.BindPFlag("secrets.rotation_interval", rootCmd.PersistentFlags().Lookup("secrets-rotation-interval"))
 
 	// Set up environment variable binding
 	viper.SetEnvPrefix("CLOUDLESS")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	// Add version command
@@ -126,6 +145,24 @@ func run(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Decode secrets keys if provided
+	var secretsMasterKey []byte
+	var secretsTokenSigningKey []byte
+	if masterKeyB64 := viper.GetString("secrets.master_key"); masterKeyB64 != "" {
+		var err error
+		secretsMasterKey, err = base64.StdEncoding.DecodeString(masterKeyB64)
+		if err != nil {
+			logger.Warn("Failed to decode secrets master key", zap.Error(err))
+		}
+	}
+	if tokenKeyB64 := viper.GetString("secrets.token_signing_key"); tokenKeyB64 != "" {
+		var err error
+		secretsTokenSigningKey, err = base64.StdEncoding.DecodeString(tokenKeyB64)
+		if err != nil {
+			logger.Warn("Failed to decode secrets token signing key", zap.Error(err))
+		}
+	}
+
 	// Initialize coordinator configuration
 	config := &coordinator.Config{
 		DataDir:       viper.GetString("data_dir"),
@@ -135,6 +172,15 @@ func run(cmd *cobra.Command, args []string) error {
 		RaftID:        viper.GetString("raft.id"),
 		RaftBootstrap: viper.GetBool("raft.bootstrap"),
 		Logger:        logger,
+
+		// Secrets management configuration (CLD-REQ-063)
+		SecretsEnabled:          viper.GetBool("secrets.enabled"),
+		SecretsMasterKey:        secretsMasterKey,
+		SecretsMasterKeyID:      viper.GetString("secrets.master_key_id"),
+		SecretsTokenSigningKey:  secretsTokenSigningKey,
+		SecretsTokenTTL:         viper.GetDuration("secrets.token_ttl"),
+		SecretsRotationEnabled:  viper.GetBool("secrets.rotation_enabled"),
+		SecretsRotationInterval: viper.GetDuration("secrets.rotation_interval"),
 	}
 
 	// Validate configuration
