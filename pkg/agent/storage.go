@@ -119,18 +119,21 @@ func (sa *StorageAgent) CreateVolume(ctx context.Context, req *storage.CreateVol
 }
 
 // MountVolume mounts a volume for use
-func (sa *StorageAgent) MountVolume(ctx context.Context, volumeID string) (string, error) {
+// workloadID is required for access control validation (CLD-REQ-052)
+func (sa *StorageAgent) MountVolume(ctx context.Context, volumeID, workloadID string) (string, error) {
 	sa.logger.Info("Mounting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
-	mountPath, err := sa.volumeManager.MountVolume(volumeID)
+	mountPath, err := sa.volumeManager.MountVolume(volumeID, workloadID)
 	if err != nil {
 		return "", fmt.Errorf("failed to mount volume: %w", err)
 	}
 
 	sa.logger.Info("Volume mounted",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 		zap.String("mount_path", mountPath),
 	)
 
@@ -138,34 +141,40 @@ func (sa *StorageAgent) MountVolume(ctx context.Context, volumeID string) (strin
 }
 
 // UnmountVolume unmounts a volume
-func (sa *StorageAgent) UnmountVolume(ctx context.Context, volumeID string) error {
+// workloadID is required for access control validation (CLD-REQ-052)
+func (sa *StorageAgent) UnmountVolume(ctx context.Context, volumeID, workloadID string) error {
 	sa.logger.Info("Unmounting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
-	if err := sa.volumeManager.UnmountVolume(volumeID); err != nil {
+	if err := sa.volumeManager.UnmountVolume(volumeID, workloadID); err != nil {
 		return fmt.Errorf("failed to unmount volume: %w", err)
 	}
 
 	sa.logger.Info("Volume unmounted",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
 	return nil
 }
 
 // DeleteVolume deletes a volume
-func (sa *StorageAgent) DeleteVolume(ctx context.Context, volumeID string) error {
+// workloadID is required for access control validation (CLD-REQ-052)
+func (sa *StorageAgent) DeleteVolume(ctx context.Context, volumeID, workloadID string) error {
 	sa.logger.Info("Deleting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
-	if err := sa.volumeManager.DeleteVolume(volumeID); err != nil {
+	if err := sa.volumeManager.DeleteVolume(volumeID, workloadID); err != nil {
 		return fmt.Errorf("failed to delete volume: %w", err)
 	}
 
 	sa.logger.Info("Volume deleted",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
 	return nil
@@ -182,18 +191,21 @@ func (sa *StorageAgent) GetVolume(ctx context.Context, volumeID string) (*storag
 }
 
 // ResizeVolume resizes a volume
-func (sa *StorageAgent) ResizeVolume(ctx context.Context, volumeID string, newSize int64) error {
+// workloadID is required for access control validation (CLD-REQ-052)
+func (sa *StorageAgent) ResizeVolume(ctx context.Context, volumeID, workloadID string, newSize int64) error {
 	sa.logger.Info("Resizing volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 		zap.Int64("new_size", newSize),
 	)
 
-	if err := sa.volumeManager.ResizeVolume(volumeID, newSize); err != nil {
+	if err := sa.volumeManager.ResizeVolume(volumeID, workloadID, newSize); err != nil {
 		return fmt.Errorf("failed to resize volume: %w", err)
 	}
 
 	sa.logger.Info("Volume resized",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 		zap.Int64("new_size", newSize),
 	)
 
@@ -330,9 +342,10 @@ func (sa *StorageAgent) UpdateVolumeUsage(ctx context.Context) error {
 	}
 
 	for _, volume := range volumes {
-		if err := sa.volumeManager.UpdateVolumeUsage(volume.ID); err != nil {
+		if err := sa.volumeManager.UpdateVolumeUsage(volume.ID, volume.WorkloadID); err != nil {
 			sa.logger.Warn("Failed to update volume usage",
 				zap.String("volume_id", volume.ID),
+				zap.String("workload_id", volume.WorkloadID),
 				zap.Error(err),
 			)
 		}

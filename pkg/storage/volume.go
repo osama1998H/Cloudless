@@ -126,10 +126,16 @@ func (vm *VolumeManager) GetVolume(volumeID string) (*Volume, error) {
 	return volume, nil
 }
 
-// MountVolume mounts a volume for use
-func (vm *VolumeManager) MountVolume(volumeID string) (string, error) {
+// MountVolume mounts a volume for use by the specified workload.
+// Access control is enforced: only the workload that created the volume can mount it.
+// Returns VolumeAccessError if workloadID doesn't match the volume's owner.
+//
+// CLD-REQ-052: Enforces node-local ephemeral volume isolation per workload
+// GO_ENGINEERING_SOP.md §8.2: Implements access control validation
+func (vm *VolumeManager) MountVolume(volumeID, workloadID string) (string, error) {
 	vm.logger.Info("Mounting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
 	// Get volume lock FIRST to prevent race conditions
@@ -137,7 +143,17 @@ func (vm *VolumeManager) MountVolume(volumeID string) (string, error) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Get volume (after lock acquired)
+	// Validate access control
+	if err := vm.validateWorkloadAccess(volumeID, workloadID); err != nil {
+		vm.logger.Warn("Volume access denied",
+			zap.String("volume_id", volumeID),
+			zap.String("caller_workload_id", workloadID),
+			zap.Error(err),
+		)
+		return "", err
+	}
+
+	// Get volume (after lock acquired and access validated)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return "", err
@@ -171,10 +187,14 @@ func (vm *VolumeManager) MountVolume(volumeID string) (string, error) {
 	return volume.MountPath, nil
 }
 
-// UnmountVolume unmounts a volume
-func (vm *VolumeManager) UnmountVolume(volumeID string) error {
+// UnmountVolume unmounts a volume. Access control is enforced.
+//
+// CLD-REQ-052: Enforces node-local ephemeral volume isolation per workload
+// GO_ENGINEERING_SOP.md §8.2: Implements access control validation
+func (vm *VolumeManager) UnmountVolume(volumeID, workloadID string) error {
 	vm.logger.Info("Unmounting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
 	// Get volume lock FIRST to prevent race conditions
@@ -182,7 +202,17 @@ func (vm *VolumeManager) UnmountVolume(volumeID string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Get volume (after lock acquired)
+	// Validate access control
+	if err := vm.validateWorkloadAccess(volumeID, workloadID); err != nil {
+		vm.logger.Warn("Volume access denied",
+			zap.String("volume_id", volumeID),
+			zap.String("caller_workload_id", workloadID),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Get volume (after lock acquired and access validated)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
@@ -205,10 +235,14 @@ func (vm *VolumeManager) UnmountVolume(volumeID string) error {
 	return nil
 }
 
-// DeleteVolume deletes a volume
-func (vm *VolumeManager) DeleteVolume(volumeID string) error {
+// DeleteVolume deletes a volume. Access control is enforced.
+//
+// CLD-REQ-052: Enforces node-local ephemeral volume isolation per workload
+// GO_ENGINEERING_SOP.md §8.2: Implements access control validation
+func (vm *VolumeManager) DeleteVolume(volumeID, workloadID string) error {
 	vm.logger.Info("Deleting volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 	)
 
 	vm.mu.Lock()
@@ -219,7 +253,17 @@ func (vm *VolumeManager) DeleteVolume(volumeID string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Get volume (after lock acquired)
+	// Validate access control
+	if err := vm.validateWorkloadAccess(volumeID, workloadID); err != nil {
+		vm.logger.Warn("Volume access denied",
+			zap.String("volume_id", volumeID),
+			zap.String("caller_workload_id", workloadID),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Get volume (after lock acquired and access validated)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
@@ -274,10 +318,14 @@ func (vm *VolumeManager) ListVolumesByWorkload(workloadID string) ([]*Volume, er
 	return volumes, nil
 }
 
-// ResizeVolume resizes a volume
-func (vm *VolumeManager) ResizeVolume(volumeID string, newSize int64) error {
+// ResizeVolume resizes a volume. Access control is enforced.
+//
+// CLD-REQ-052: Enforces node-local ephemeral volume isolation per workload
+// GO_ENGINEERING_SOP.md §8.2: Implements access control validation
+func (vm *VolumeManager) ResizeVolume(volumeID, workloadID string, newSize int64) error {
 	vm.logger.Info("Resizing volume",
 		zap.String("volume_id", volumeID),
+		zap.String("workload_id", workloadID),
 		zap.Int64("new_size", newSize),
 	)
 
@@ -286,7 +334,17 @@ func (vm *VolumeManager) ResizeVolume(volumeID string, newSize int64) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Get volume (after lock acquired)
+	// Validate access control
+	if err := vm.validateWorkloadAccess(volumeID, workloadID); err != nil {
+		vm.logger.Warn("Volume access denied",
+			zap.String("volume_id", volumeID),
+			zap.String("caller_workload_id", workloadID),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Get volume (after lock acquired and access validated)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
@@ -319,14 +377,27 @@ func (vm *VolumeManager) ResizeVolume(volumeID string, newSize int64) error {
 	return nil
 }
 
-// UpdateVolumeUsage updates the used space for a volume
-func (vm *VolumeManager) UpdateVolumeUsage(volumeID string) error {
+// UpdateVolumeUsage updates the used space for a volume. Access control is enforced.
+//
+// CLD-REQ-052: Enforces node-local ephemeral volume isolation per workload
+// GO_ENGINEERING_SOP.md §8.2: Implements access control validation
+func (vm *VolumeManager) UpdateVolumeUsage(volumeID, workloadID string) error {
 	// Get volume lock FIRST to prevent race conditions
 	lock := vm.getVolumeLock(volumeID)
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Get volume (after lock acquired)
+	// Validate access control
+	if err := vm.validateWorkloadAccess(volumeID, workloadID); err != nil {
+		vm.logger.Warn("Volume access denied",
+			zap.String("volume_id", volumeID),
+			zap.String("caller_workload_id", workloadID),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Get volume (after lock acquired and access validated)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
@@ -417,7 +488,7 @@ func (vm *VolumeManager) CleanupWorkloadVolumes(workloadID string) error {
 	for _, volume := range volumes {
 		// Unmount if mounted
 		if volume.State == VolumeStateMounted {
-			if err := vm.UnmountVolume(volume.ID); err != nil {
+			if err := vm.UnmountVolume(volume.ID, workloadID); err != nil {
 				vm.logger.Error("Failed to unmount volume",
 					zap.String("volume_id", volume.ID),
 					zap.Error(err),
@@ -427,7 +498,7 @@ func (vm *VolumeManager) CleanupWorkloadVolumes(workloadID string) error {
 		}
 
 		// Delete volume
-		if err := vm.DeleteVolume(volume.ID); err != nil {
+		if err := vm.DeleteVolume(volume.ID, workloadID); err != nil {
 			vm.logger.Error("Failed to delete volume",
 				zap.String("volume_id", volume.ID),
 				zap.Error(err),
@@ -504,6 +575,26 @@ func (vm *VolumeManager) getVolumeLock(volumeID string) *sync.RWMutex {
 	lock := &sync.RWMutex{}
 	vm.volumeLock.Store(volumeID, lock)
 	return lock
+}
+
+// validateWorkloadAccess checks if callerWorkloadID can access the volume
+// Satisfies CLD-REQ-052 isolation requirement and GO_ENGINEERING_SOP.md §8.2 (access control)
+func (vm *VolumeManager) validateWorkloadAccess(volumeID, callerWorkloadID string) error {
+	volume, err := vm.GetVolume(volumeID)
+	if err != nil {
+		return err
+	}
+
+	if volume.WorkloadID != callerWorkloadID {
+		return &VolumeAccessError{
+			VolumeID:  volumeID,
+			CallerID:  callerWorkloadID,
+			OwnerID:   volume.WorkloadID,
+			Operation: "access",
+		}
+	}
+
+	return nil
 }
 
 // checkAvailableSpace checks if there's enough space available

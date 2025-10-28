@@ -167,7 +167,7 @@ func TestVolumeManager_MountVolume_Success(t *testing.T) {
 	}
 
 	// Mount volume
-	mountPath, err := vm.MountVolume(volume.ID)
+	mountPath, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
@@ -211,13 +211,13 @@ func TestVolumeManager_MountVolume_AlreadyMounted(t *testing.T) {
 	}
 
 	// First mount
-	path1, err := vm.MountVolume(volume.ID)
+	path1, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("First MountVolume failed: %v", err)
 	}
 
 	// Second mount (should be idempotent and return same path)
-	path2, err := vm.MountVolume(volume.ID)
+	path2, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("Second MountVolume failed: %v", err)
 	}
@@ -246,13 +246,13 @@ func TestVolumeManager_UnmountVolume_Success(t *testing.T) {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 
-	_, err = vm.MountVolume(volume.ID)
+	_, err = vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
 
 	// Unmount
-	err = vm.UnmountVolume(volume.ID)
+	err = vm.UnmountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("UnmountVolume failed: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestVolumeManager_UnmountVolume_NotMounted(t *testing.T) {
 	}
 
 	// Try to unmount - should fail
-	err = vm.UnmountVolume(volume.ID)
+	err = vm.UnmountVolume(volume.ID, req.WorkloadID)
 	if err == nil {
 		t.Error("Expected error when unmounting non-mounted volume, got nil")
 	}
@@ -316,7 +316,7 @@ func TestVolumeManager_DeleteVolume_Success(t *testing.T) {
 	volumePath := volume.Path
 
 	// Delete volume
-	err = vm.DeleteVolume(volume.ID)
+	err = vm.DeleteVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("DeleteVolume failed: %v", err)
 	}
@@ -352,13 +352,13 @@ func TestVolumeManager_DeleteVolume_WhileMounted(t *testing.T) {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 
-	_, err = vm.MountVolume(volume.ID)
+	_, err = vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
 
 	// Try to delete mounted volume - should fail
-	err = vm.DeleteVolume(volume.ID)
+	err = vm.DeleteVolume(volume.ID, req.WorkloadID)
 	if err == nil {
 		t.Error("Expected error when deleting mounted volume, got nil")
 	}
@@ -490,7 +490,7 @@ func TestVolumeManager_ResizeVolume_Expansion(t *testing.T) {
 
 	// Resize to 2MB
 	newSize := int64(1024 * 1024 * 2)
-	err = vm.ResizeVolume(volume.ID, newSize)
+	err = vm.ResizeVolume(volume.ID, req.WorkloadID, newSize)
 	if err != nil {
 		t.Fatalf("ResizeVolume failed: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestVolumeManager_ResizeVolume_BelowUsedSpace(t *testing.T) {
 	}
 
 	// Mount and write some data
-	mountPath, err := vm.MountVolume(volume.ID)
+	mountPath, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
@@ -539,13 +539,13 @@ func TestVolumeManager_ResizeVolume_BelowUsedSpace(t *testing.T) {
 	}
 
 	// Update usage
-	err = vm.UpdateVolumeUsage(volume.ID)
+	err = vm.UpdateVolumeUsage(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("UpdateVolumeUsage failed: %v", err)
 	}
 
 	// Try to resize below used space (5MB -> 1MB) - should fail
-	err = vm.ResizeVolume(volume.ID, 1024*1024)
+	err = vm.ResizeVolume(volume.ID, req.WorkloadID, 1024*1024)
 	if err == nil {
 		t.Error("Expected error when resizing below used space, got nil")
 	}
@@ -570,7 +570,7 @@ func TestVolumeManager_UpdateVolumeUsage_Success(t *testing.T) {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 
-	mountPath, err := vm.MountVolume(volume.ID)
+	mountPath, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestVolumeManager_UpdateVolumeUsage_Success(t *testing.T) {
 	}
 
 	// Update usage
-	err = vm.UpdateVolumeUsage(volume.ID)
+	err = vm.UpdateVolumeUsage(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("UpdateVolumeUsage failed: %v", err)
 	}
@@ -623,7 +623,7 @@ func TestVolumeManager_CreateSnapshot_Success(t *testing.T) {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 
-	mountPath, err := vm.MountVolume(volume.ID)
+	mountPath, err := vm.MountVolume(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestVolumeManager_CreateSnapshot_Success(t *testing.T) {
 	}
 
 	// Update usage
-	err = vm.UpdateVolumeUsage(volume.ID)
+	err = vm.UpdateVolumeUsage(volume.ID, req.WorkloadID)
 	if err != nil {
 		t.Fatalf("UpdateVolumeUsage failed: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestVolumeManager_CleanupWorkloadVolumes_Success(t *testing.T) {
 
 		// Mount some volumes
 		if i <= 2 {
-			_, err = vm.MountVolume(volume.ID)
+			_, err = vm.MountVolume(volume.ID, req.WorkloadID)
 			if err != nil {
 				t.Fatalf("MountVolume %d failed: %v", i, err)
 			}
@@ -761,7 +761,7 @@ func TestVolumeManager_GetVolumeStats_Accuracy(t *testing.T) {
 	}
 
 	// Mount one volume
-	_, err := vm.MountVolume("vol-stats-1")
+	_, err := vm.MountVolume("vol-stats-1", "workload-1")
 	if err != nil {
 		t.Fatalf("MountVolume failed: %v", err)
 	}
@@ -837,8 +837,8 @@ func TestVolumeManager_ConcurrentAccess_RaceConditions(t *testing.T) {
 	// Goroutine 3: Mount/unmount
 	go func() {
 		for i := 0; i < 50; i++ {
-			_, _ = vm.MountVolume("vol-race-2")
-			_ = vm.UnmountVolume("vol-race-2")
+			_, _ = vm.MountVolume("vol-race-2", "workload-1")
+			_ = vm.UnmountVolume("vol-race-2", "workload-1")
 		}
 		done <- true
 	}()
@@ -935,9 +935,9 @@ func TestVolumeManager_GetVolume_NotFound(t *testing.T) {
 	}
 }
 
-// TestVolumeManager_WorkloadIsolation_CannotAccessOtherWorkload tests security
-// CRITICAL: This test documents current security gap in CLD-REQ-052
-// TODO: Add access control validation in production
+// TestVolumeManager_WorkloadIsolation_CannotAccessOtherWorkload tests access control
+// Satisfies CLD-REQ-052: Node-local ephemeral volumes are isolated per workload
+// Satisfies GO_ENGINEERING_SOP.md §8.2: Access control validation
 func TestVolumeManager_WorkloadIsolation_CannotAccessOtherWorkload(t *testing.T) {
 	vm, _, cleanup := setupVolumeManager(t)
 	defer cleanup()
@@ -956,27 +956,218 @@ func TestVolumeManager_WorkloadIsolation_CannotAccessOtherWorkload(t *testing.T)
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 
-	// NOTE: Current implementation DOES NOT validate workload ownership
-	// This is a SECURITY GAP that needs to be fixed
-	// In production, GetVolume should accept workloadID parameter and validate
-
-	// For now, verify we can get any volume regardless of workload
-	// This test documents the gap
-	vol, err := vm.GetVolume(volume.ID)
+	// Verify workload-1 CAN mount its own volume
+	_, err = vm.MountVolume(volume.ID, "workload-1")
 	if err != nil {
-		t.Fatalf("GetVolume failed: %v", err)
+		t.Fatalf("workload-1 should be able to mount its own volume: %v", err)
 	}
 
-	// Verify volume belongs to workload-1
-	if vol.WorkloadID != "workload-1" {
-		t.Errorf("Expected workload ID workload-1, got %s", vol.WorkloadID)
+	// Verify workload-2 CANNOT mount workload-1's volume
+	_, err = vm.MountVolume(volume.ID, "workload-2")
+	if err == nil {
+		t.Error("workload-2 should NOT be able to mount workload-1's volume")
+	}
+	if !IsVolumeAccessError(err) {
+		t.Errorf("Expected VolumeAccessError, got: %v", err)
 	}
 
-	// TODO: In production, this should fail if called by workload-2:
-	// _, err = vm.GetVolumeAsWorkload(volume.ID, "workload-2")
-	// if err == nil {
-	//     t.Error("Should not allow workload-2 to access workload-1's volume")
-	// }
+	// Verify workload-2 CANNOT unmount workload-1's volume
+	err = vm.UnmountVolume(volume.ID, "workload-2")
+	if err == nil {
+		t.Error("workload-2 should NOT be able to unmount workload-1's volume")
+	}
+	if !IsVolumeAccessError(err) {
+		t.Errorf("Expected VolumeAccessError, got: %v", err)
+	}
 
-	t.Log("WARNING: Access control validation not implemented - security gap exists")
+	// Verify workload-2 CANNOT delete workload-1's volume
+	err = vm.DeleteVolume(volume.ID, "workload-2")
+	if err == nil {
+		t.Error("workload-2 should NOT be able to delete workload-1's volume")
+	}
+	if !IsVolumeAccessError(err) {
+		t.Errorf("Expected VolumeAccessError, got: %v", err)
+	}
+
+	// Verify workload-2 CANNOT resize workload-1's volume
+	err = vm.ResizeVolume(volume.ID, "workload-2", 2*1024*1024)
+	if err == nil {
+		t.Error("workload-2 should NOT be able to resize workload-1's volume")
+	}
+	if !IsVolumeAccessError(err) {
+		t.Errorf("Expected VolumeAccessError, got: %v", err)
+	}
+
+	// Verify workload-2 CANNOT update usage for workload-1's volume
+	err = vm.UpdateVolumeUsage(volume.ID, "workload-2")
+	if err == nil {
+		t.Error("workload-2 should NOT be able to update usage for workload-1's volume")
+	}
+	if !IsVolumeAccessError(err) {
+		t.Errorf("Expected VolumeAccessError, got: %v", err)
+	}
+
+	t.Log("✓ Access control validation successfully enforced for all operations")
+}
+
+// TestVolumeManager_AccessControl_DenyUnauthorized tests comprehensive access denial
+// Satisfies CLD-REQ-052 and GO_ENGINEERING_SOP.md §8.2
+func TestVolumeManager_AccessControl_DenyUnauthorized(t *testing.T) {
+	vm, _, cleanup := setupVolumeManager(t)
+	defer cleanup()
+
+	// Create volumes for multiple workloads
+	workloads := []string{"workload-alpha", "workload-beta", "workload-gamma"}
+	volumeIDs := make(map[string]string)
+
+	for i, workloadID := range workloads {
+		req := &CreateVolumeRequest{
+			VolumeID:   "vol-access-" + string(rune('a'+i)),
+			Name:       "access-test",
+			WorkloadID: workloadID,
+			SizeBytes:  1024 * 1024,
+			IOPSClass:  IOPSClassMedium,
+		}
+
+		volume, err := vm.CreateVolume(req)
+		if err != nil {
+			t.Fatalf("CreateVolume for %s failed: %v", workloadID, err)
+		}
+		volumeIDs[workloadID] = volume.ID
+	}
+
+	// Test cross-workload access denial for all operations
+	operations := []struct {
+		name string
+		fn   func(volumeID, workloadID string) error
+	}{
+		{"MountVolume", func(vid, wid string) error {
+			_, err := vm.MountVolume(vid, wid)
+			return err
+		}},
+		{"UnmountVolume", func(vid, wid string) error {
+			return vm.UnmountVolume(vid, wid)
+		}},
+		{"DeleteVolume", func(vid, wid string) error {
+			return vm.DeleteVolume(vid, wid)
+		}},
+		{"ResizeVolume", func(vid, wid string) error {
+			return vm.ResizeVolume(vid, wid, 2*1024*1024)
+		}},
+		{"UpdateVolumeUsage", func(vid, wid string) error {
+			return vm.UpdateVolumeUsage(vid, wid)
+		}},
+	}
+
+	// Test that each workload CANNOT access other workloads' volumes
+	for ownerWorkload, volumeID := range volumeIDs {
+		for _, callerWorkload := range workloads {
+			if ownerWorkload == callerWorkload {
+				continue // Skip owner's own volume
+			}
+
+			for _, op := range operations {
+				err := op.fn(volumeID, callerWorkload)
+				if err == nil {
+					t.Errorf("%s: %s should NOT be able to access %s's volume",
+						op.name, callerWorkload, ownerWorkload)
+				}
+				if !IsVolumeAccessError(err) {
+					t.Errorf("%s: Expected VolumeAccessError for %s accessing %s's volume, got: %v",
+						op.name, callerWorkload, ownerWorkload, err)
+				}
+			}
+		}
+	}
+
+	t.Log("✓ All cross-workload access attempts correctly denied")
+}
+
+// TestVolumeManager_AccessControl_WorkloadLifecycle tests full lifecycle with access control
+// Satisfies CLD-REQ-052 ephemeral volume lifecycle with security
+func TestVolumeManager_AccessControl_WorkloadLifecycle(t *testing.T) {
+	vm, _, cleanup := setupVolumeManager(t)
+	defer cleanup()
+
+	// Workload lifecycle simulation
+	workloadID := "workload-lifecycle"
+
+	// 1. Create volume
+	req := &CreateVolumeRequest{
+		VolumeID:   "vol-lifecycle",
+		Name:       "lifecycle-test",
+		WorkloadID: workloadID,
+		SizeBytes:  5 * 1024 * 1024,
+		IOPSClass:  IOPSClassHigh,
+	}
+
+	volume, err := vm.CreateVolume(req)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	// 2. Mount volume
+	mountPath, err := vm.MountVolume(volume.ID, workloadID)
+	if err != nil {
+		t.Fatalf("MountVolume failed: %v", err)
+	}
+	if mountPath == "" {
+		t.Error("MountPath should not be empty")
+	}
+
+	// 3. Verify another workload cannot access
+	_, err = vm.MountVolume(volume.ID, "workload-intruder")
+	if err == nil || !IsVolumeAccessError(err) {
+		t.Error("Intruder should not be able to access volume during lifecycle")
+	}
+
+	// 4. Resize volume (authorized)
+	newSize := int64(10 * 1024 * 1024)
+	err = vm.ResizeVolume(volume.ID, workloadID, newSize)
+	if err != nil {
+		t.Fatalf("ResizeVolume (authorized) failed: %v", err)
+	}
+
+	vol, _ := vm.GetVolume(volume.ID)
+	if vol.SizeBytes != newSize {
+		t.Errorf("Expected size %d, got %d", newSize, vol.SizeBytes)
+	}
+
+	// 5. Verify intruder cannot resize
+	err = vm.ResizeVolume(volume.ID, "workload-intruder", 20*1024*1024)
+	if err == nil || !IsVolumeAccessError(err) {
+		t.Error("Intruder should not be able to resize volume")
+	}
+
+	// 6. Update usage (authorized)
+	err = vm.UpdateVolumeUsage(volume.ID, workloadID)
+	if err != nil {
+		t.Fatalf("UpdateVolumeUsage (authorized) failed: %v", err)
+	}
+
+	// 7. Unmount volume (authorized)
+	err = vm.UnmountVolume(volume.ID, workloadID)
+	if err != nil {
+		t.Fatalf("UnmountVolume (authorized) failed: %v", err)
+	}
+
+	// 8. Verify intruder cannot delete
+	err = vm.DeleteVolume(volume.ID, "workload-intruder")
+	if err == nil || !IsVolumeAccessError(err) {
+		t.Error("Intruder should not be able to delete volume")
+	}
+
+	// 9. Delete volume (authorized)
+	err = vm.DeleteVolume(volume.ID, workloadID)
+	if err != nil {
+		t.Fatalf("DeleteVolume (authorized) failed: %v", err)
+	}
+
+	// 10. Verify volume fully removed
+	_, err = vm.GetVolume(volume.ID)
+	if err == nil {
+		t.Error("Volume should be removed after deletion")
+	}
+
+	t.Log("✓ Complete workload lifecycle with access control validation successful")
 }
