@@ -25,8 +25,8 @@ type VolumeManager struct {
 func NewVolumeManager(config StorageConfig, nodeID string, logger *zap.Logger) (*VolumeManager, error) {
 	baseDir := filepath.Join(config.DataDir, "volumes")
 
-	// Create volumes directory
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	// Create volumes directory with secure permissions (owner-only)
+	if err := os.MkdirAll(baseDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create volumes directory: %w", err)
 	}
 
@@ -72,15 +72,15 @@ func (vm *VolumeManager) CreateVolume(req *CreateVolumeRequest) (*Volume, error)
 		return nil, fmt.Errorf("insufficient space: %w", err)
 	}
 
-	// Create volume directory
+	// Create volume directory with secure permissions (owner-only)
 	volumePath := vm.getVolumePath(req.VolumeID)
-	if err := os.MkdirAll(volumePath, 0755); err != nil {
+	if err := os.MkdirAll(volumePath, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create volume directory: %w", err)
 	}
 
-	// Create mount point
+	// Create mount point with secure permissions (owner-only)
 	mountPath := filepath.Join(volumePath, "mount")
-	if err := os.MkdirAll(mountPath, 0755); err != nil {
+	if err := os.MkdirAll(mountPath, 0700); err != nil {
 		os.RemoveAll(volumePath)
 		return nil, fmt.Errorf("failed to create mount point: %w", err)
 	}
@@ -132,16 +132,16 @@ func (vm *VolumeManager) MountVolume(volumeID string) (string, error) {
 		zap.String("volume_id", volumeID),
 	)
 
-	// Get volume
+	// Get volume lock FIRST to prevent race conditions
+	lock := vm.getVolumeLock(volumeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Get volume (after lock acquired)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return "", err
 	}
-
-	// Get volume lock
-	lock := vm.getVolumeLock(volumeID)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// Check if already mounted
 	if volume.State == VolumeStateMounted {
@@ -177,16 +177,16 @@ func (vm *VolumeManager) UnmountVolume(volumeID string) error {
 		zap.String("volume_id", volumeID),
 	)
 
-	// Get volume
+	// Get volume lock FIRST to prevent race conditions
+	lock := vm.getVolumeLock(volumeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Get volume (after lock acquired)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
 	}
-
-	// Get volume lock
-	lock := vm.getVolumeLock(volumeID)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// Check if mounted
 	if volume.State != VolumeStateMounted {
@@ -214,16 +214,16 @@ func (vm *VolumeManager) DeleteVolume(volumeID string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	// Get volume
+	// Get volume lock FIRST to prevent race conditions
+	lock := vm.getVolumeLock(volumeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Get volume (after lock acquired)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
 	}
-
-	// Get volume lock
-	lock := vm.getVolumeLock(volumeID)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// Check if mounted
 	if volume.State == VolumeStateMounted {
@@ -281,16 +281,16 @@ func (vm *VolumeManager) ResizeVolume(volumeID string, newSize int64) error {
 		zap.Int64("new_size", newSize),
 	)
 
-	// Get volume
+	// Get volume lock FIRST to prevent race conditions
+	lock := vm.getVolumeLock(volumeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Get volume (after lock acquired)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
 	}
-
-	// Get volume lock
-	lock := vm.getVolumeLock(volumeID)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// Validate new size
 	if newSize < volume.UsedBytes {
@@ -321,16 +321,16 @@ func (vm *VolumeManager) ResizeVolume(volumeID string, newSize int64) error {
 
 // UpdateVolumeUsage updates the used space for a volume
 func (vm *VolumeManager) UpdateVolumeUsage(volumeID string) error {
-	// Get volume
+	// Get volume lock FIRST to prevent race conditions
+	lock := vm.getVolumeLock(volumeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Get volume (after lock acquired)
 	volume, err := vm.GetVolume(volumeID)
 	if err != nil {
 		return err
 	}
-
-	// Get volume lock
-	lock := vm.getVolumeLock(volumeID)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// Calculate used space
 	usedBytes, err := vm.calculateVolumeUsage(volume.MountPath)
@@ -369,9 +369,9 @@ func (vm *VolumeManager) CreateSnapshot(volumeID, snapshotID string) (*VolumeSna
 	lock.RLock()
 	defer lock.RUnlock()
 
-	// Create snapshot directory
+	// Create snapshot directory with secure permissions (owner-only)
 	snapshotPath := filepath.Join(vm.baseDir, "snapshots", snapshotID)
-	if err := os.MkdirAll(snapshotPath, 0755); err != nil {
+	if err := os.MkdirAll(snapshotPath, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create snapshot directory: %w", err)
 	}
 
@@ -456,6 +456,13 @@ func (vm *VolumeManager) GetVolumeStats() VolumeStats {
 
 	vm.volumes.Range(func(key, value interface{}) bool {
 		volume := value.(*Volume)
+		volumeID := volume.ID
+
+		// Acquire read lock to prevent race conditions
+		lock := vm.getVolumeLock(volumeID)
+		lock.RLock()
+		defer lock.RUnlock()
+
 		stats.TotalVolumes++
 		stats.TotalAllocatedBytes += volume.SizeBytes
 		stats.TotalUsedBytes += volume.UsedBytes
@@ -588,7 +595,8 @@ func (vm *VolumeManager) copyFile(src, dst string) error {
 		return err
 	}
 
-	return os.WriteFile(dst, sourceData, 0644)
+	// Write with secure permissions (owner-only read/write)
+	return os.WriteFile(dst, sourceData, 0600)
 }
 
 // loadVolumes loads existing volumes from disk

@@ -105,6 +105,27 @@ func IsQuotaExceededError(err error) bool {
 	return errors.As(err, &quotaErr)
 }
 
+// VolumeAccessError indicates unauthorized access to a volume
+// Satisfies CLD-REQ-052 isolation requirement and GO_ENGINEERING_SOP.md §8.2
+type VolumeAccessError struct {
+	VolumeID  string
+	CallerID  string
+	OwnerID   string
+	Operation string
+}
+
+// Error implements the error interface
+func (e *VolumeAccessError) Error() string {
+	return fmt.Sprintf("workload %s cannot %s volume %s (owned by %s)",
+		e.CallerID, e.Operation, e.VolumeID, e.OwnerID)
+}
+
+// IsVolumeAccessError checks if an error is a VolumeAccessError
+func IsVolumeAccessError(err error) bool {
+	var accessErr *VolumeAccessError
+	return errors.As(err, &accessErr)
+}
+
 // Common errors
 var (
 	ErrNoLeader         = errors.New("no RAFT leader available")
