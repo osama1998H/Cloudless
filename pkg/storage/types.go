@@ -70,6 +70,12 @@ type Object struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	AccessedAt   time.Time
+
+	// Erasure Coding fields (CLD-REQ-053)
+	ECEnabled    bool  // True if object is erasure coded
+	DataShards   int   // Number of data shards (k)
+	ParityShards int   // Number of parity shards (m)
+	ShardIndices []int // Shard index for each ChunkID
 }
 
 // Chunk represents a content-addressed storage chunk
@@ -141,6 +147,36 @@ const (
 	ReplicationFactorThree ReplicationFactor = 3
 )
 
+// ErasureConfig contains configuration for erasure coding (CLD-REQ-053)
+type ErasureConfig struct {
+	// Enabled enables erasure coding for cold data
+	Enabled bool
+
+	// DataShards is the number of data shards (k)
+	DataShards int
+
+	// ParityShards is the number of parity shards (m)
+	ParityShards int
+
+	// MinNodeCount is the minimum number of nodes required for EC (default 6)
+	MinNodeCount int
+
+	// ColdThreshold is the duration after which data is considered "cold"
+	ColdThreshold time.Duration
+}
+
+// DefaultErasureConfig returns default erasure coding configuration
+// CLD-REQ-053: k=4 data shards + m=2 parity shards = 6 total shards minimum
+func DefaultErasureConfig() ErasureConfig {
+	return ErasureConfig{
+		Enabled:       false,                  // Opt-in feature
+		DataShards:    4,                      // k=4 data shards
+		ParityShards:  2,                      // m=2 parity shards (total 6)
+		MinNodeCount:  6,                      // CLD-REQ-053 requirement
+		ColdThreshold: 7 * 24 * time.Hour,    // 7 days without access = cold
+	}
+}
+
 // StorageConfig contains configuration for the storage system
 type StorageConfig struct {
 	// DataDir is the base directory for local storage
@@ -169,6 +205,9 @@ type StorageConfig struct {
 
 	// QuorumWrites requires W=R/2+1 acknowledgments for writes
 	QuorumWrites bool
+
+	// ErasureConfig contains erasure coding configuration (CLD-REQ-053)
+	ErasureConfig ErasureConfig
 }
 
 // DefaultStorageConfig returns a default storage configuration
@@ -183,6 +222,7 @@ func DefaultStorageConfig() StorageConfig {
 		MaxDiskUsagePercent: 90,
 		EnableReadRepair:    true,
 		QuorumWrites:        true,
+		ErasureConfig:       DefaultErasureConfig(), // CLD-REQ-053: Erasure coding for cold data
 	}
 }
 

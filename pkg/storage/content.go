@@ -258,3 +258,117 @@ func (ce *ContentEngine) GetChunkCount(size int64) int {
 
 	return int(count)
 }
+
+// StoreContentWithEC stores content using erasure coding if enabled
+// CLD-REQ-053: Applies erasure coding for cold data storage
+func (ce *ContentEngine) StoreContentWithEC(data []byte, erasureEncoder *ErasureEncoder) ([]string, []int, string, error) {
+	if len(data) == 0 {
+		return nil, nil, "", fmt.Errorf("cannot store empty content")
+	}
+
+	if erasureEncoder == nil {
+		// Fall back to regular storage
+		chunkIDs, checksum, err := ce.StoreContent(data)
+		return chunkIDs, nil, checksum, err
+	}
+
+	// Calculate overall checksum
+	overallChecksum := ce.calculateChecksum(data)
+
+	// Encode data into shards
+	shards, err := erasureEncoder.Encode(data)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to encode shards: %w", err)
+	}
+
+	// Store each shard as a chunk
+	var chunkIDs []string
+	var shardIndices []int
+
+	for i, shard := range shards {
+		chunk, err := ce.chunkStore.WriteChunk(shard)
+		if err != nil {
+			// Cleanup on failure
+			ce.cleanupChunks(chunkIDs)
+			return nil, nil, "", fmt.Errorf("failed to write shard %d: %w", i, err)
+		}
+
+		chunkIDs = append(chunkIDs, chunk.ID)
+		shardIndices = append(shardIndices, i)
+	}
+
+	ce.logger.Debug("Stored content with erasure coding",
+		zap.Int("original_size", len(data)),
+		zap.Int("shard_count", len(shards)),
+		zap.String("checksum", overallChecksum),
+	)
+
+	return chunkIDs, shardIndices, overallChecksum, nil
+}
+
+// RetrieveContentWithEC retrieves and decodes erasure coded content
+// CLD-REQ-053: Supports degraded reads when shards are missing
+func (ce *ContentEngine) RetrieveContentWithEC(chunkIDs []string, shardIndices []int, originalSize int, erasureEncoder *ErasureEncoder) ([]byte, error) {
+	if erasureEncoder == nil {
+		return nil, fmt.Errorf("erasure encoder is required")
+	}
+
+	if len(chunkIDs) == 0 {
+		return []byte{}, nil
+	}
+
+	// Read all shards
+	totalShards := erasureEncoder.GetTotalShardCount()
+	shards := make([][]byte, totalShards)
+	availableCount := 0
+
+	for i, chunkID := range chunkIDs {
+		data, err := ce.chunkStore.ReadChunk(chunkID)
+		if err != nil {
+			ce.logger.Warn("Failed to read shard, will attempt reconstruction",
+				zap.String("chunk_id", chunkID),
+				zap.Int("shard_index", i),
+				zap.Error(err),
+			)
+			// Use shard index from metadata
+			var shardIdx int
+			if i < len(shardIndices) {
+				shardIdx = shardIndices[i]
+			} else {
+				shardIdx = i
+			}
+			shards[shardIdx] = nil // Mark as missing
+			continue
+		}
+
+		// Use shard index from metadata
+		var shardIdx int
+		if i < len(shardIndices) {
+			shardIdx = shardIndices[i]
+		} else {
+			shardIdx = i
+		}
+		shards[shardIdx] = data
+		availableCount++
+	}
+
+	// Check if we can reconstruct
+	if !erasureEncoder.CanReconstruct(availableCount) {
+		return nil, fmt.Errorf("insufficient shards for reconstruction: have %d, need %d",
+			availableCount, erasureEncoder.GetDataShardCount())
+	}
+
+	// Decode data from shards
+	data, err := erasureEncoder.Decode(shards, originalSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode shards: %w", err)
+	}
+
+	ce.logger.Debug("Retrieved content with erasure coding",
+		zap.Int("reconstructed_size", len(data)),
+		zap.Int("available_shards", availableCount),
+		zap.Int("total_shards", totalShards),
+	)
+
+	return data, nil
+}

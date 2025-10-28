@@ -590,6 +590,75 @@ func (m *Manager) ListNodes(filters map[string]string) ([]*NodeInfo, error) {
 	return nodes, nil
 }
 
+// GetActiveNodeCount returns the count of healthy active nodes
+// CLD-REQ-053: Required for erasure coding node count threshold (≥6 nodes)
+func (m *Manager) GetActiveNodeCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, node := range m.nodes {
+		// Count nodes in Ready state (healthy and active)
+		if node.State == StateReady {
+			count++
+		}
+	}
+
+	return count
+}
+
+// GetClusterStatus returns comprehensive cluster status information
+// CLD-REQ-053: Provides node count for erasure coding eligibility check
+type ClusterStatus struct {
+	TotalNodes    int               `json:"total_nodes"`
+	ActiveNodes   int               `json:"active_nodes"`
+	OfflineNodes  int               `json:"offline_nodes"`
+	DrainingNodes int               `json:"draining_nodes"`
+	FailedNodes   int               `json:"failed_nodes"`
+	NodesByState  map[string]int    `json:"nodes_by_state"`
+	NodesByRegion map[string]int    `json:"nodes_by_region"`
+	NodesByZone   map[string]int    `json:"nodes_by_zone"`
+}
+
+// GetClusterStatus returns the current cluster status
+func (m *Manager) GetClusterStatus() *ClusterStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	status := &ClusterStatus{
+		TotalNodes:    len(m.nodes),
+		NodesByState:  make(map[string]int),
+		NodesByRegion: make(map[string]int),
+		NodesByZone:   make(map[string]int),
+	}
+
+	for _, node := range m.nodes {
+		// Count by state
+		status.NodesByState[node.State]++
+
+		switch node.State {
+		case StateReady:
+			status.ActiveNodes++
+		case StateOffline:
+			status.OfflineNodes++
+		case StateDraining:
+			status.DrainingNodes++
+		case StateFailed:
+			status.FailedNodes++
+		}
+
+		// Count by region and zone
+		if node.Region != "" {
+			status.NodesByRegion[node.Region]++
+		}
+		if node.Zone != "" {
+			status.NodesByZone[node.Zone]++
+		}
+	}
+
+	return status
+}
+
 // DrainNode starts draining a node
 func (m *Manager) DrainNode(nodeID string, graceful bool, timeout time.Duration) error {
 	m.mu.Lock()
