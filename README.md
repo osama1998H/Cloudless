@@ -1,5 +1,12 @@
 # Cloudless Platform
 
+[![CI](https://github.com/osama1998H/Cloudless/actions/workflows/ci.yml/badge.svg)](https://github.com/osama1998H/Cloudless/actions/workflows/ci.yml)
+[![Release](https://github.com/osama1998H/Cloudless/actions/workflows/release.yml/badge.svg)](https://github.com/osama1998H/Cloudless/actions/workflows/release.yml)
+[![CodeQL](https://github.com/osama1998H/Cloudless/actions/workflows/codeql.yml/badge.svg)](https://github.com/osama1998H/Cloudless/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/osama1998H/Cloudless)](https://goreportcard.com/report/github.com/osama1998H/Cloudless)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/osama1998H/Cloudless)](go.mod)
+
 A distributed compute platform that unifies heterogeneous devices (phones, laptops, PCs, IoT gateways, VPS) into a single elastic compute fabric.
 
 ## Overview

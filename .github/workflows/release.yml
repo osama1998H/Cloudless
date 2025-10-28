@@ -1,0 +1,219 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-binaries:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install dependencies
+        run: make mod
+
+      - name: Generate protobuf
+        run: make proto
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT} -s -w"
+
+          # Build coordinator
+          CGO_ENABLED=0 go build -ldflags="${LDFLAGS}" -o build/coordinator-${{ matrix.os }}-${{ matrix.arch }} ./cmd/coordinator
+
+          # Build agent
+          CGO_ENABLED=0 go build -ldflags="${LDFLAGS}" -o build/agent-${{ matrix.os }}-${{ matrix.arch }} ./cmd/agent
+
+          # Build CLI
+          CGO_ENABLED=0 go build -ldflags="${LDFLAGS}" -o build/cloudlessctl-${{ matrix.os }}-${{ matrix.arch }} ./cmd/cloudlessctl
+
+          # Add .exe extension for Windows
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            mv build/coordinator-${{ matrix.os }}-${{ matrix.arch }} build/coordinator-${{ matrix.os }}-${{ matrix.arch }}.exe
+            mv build/agent-${{ matrix.os }}-${{ matrix.arch }} build/agent-${{ matrix.os }}-${{ matrix.arch }}.exe
+            mv build/cloudlessctl-${{ matrix.os }}-${{ matrix.arch }} build/cloudlessctl-${{ matrix.os }}-${{ matrix.arch }}.exe
+          fi
+
+      - name: Create archives
+        run: |
+          cd build
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip cloudless-${{ matrix.os }}-${{ matrix.arch }}.zip *-${{ matrix.os }}-${{ matrix.arch }}.exe
+          else
+            tar czf cloudless-${{ matrix.os }}-${{ matrix.arch }}.tar.gz *-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+          cd ..
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudless-${{ matrix.os }}-${{ matrix.arch }}
+          path: build/cloudless-*
+          retention-days: 30
+
+  build-docker:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta-coordinator
+        uses: docker/metadata-action@v5
+        with:
+          images: cloudless/coordinator
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+
+      - name: Build and push coordinator
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/docker/Dockerfile.coordinator
+          push: true
+          tags: ${{ steps.meta-coordinator.outputs.tags }}
+          labels: ${{ steps.meta-coordinator.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for agent
+        id: meta-agent
+        uses: docker/metadata-action@v5
+        with:
+          images: cloudless/agent
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+
+      - name: Build and push agent
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/docker/Dockerfile.agent
+          push: true
+          tags: ${{ steps.meta-agent.outputs.tags }}
+          labels: ${{ steps.meta-agent.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-binaries, build-docker]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.tar.gz" -o -name "*.zip" | xargs -I {} mv {} release-assets/
+          ls -lh release-assets/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          body: |
+            ## Cloudless ${{ github.ref_name }}
+
+            ### What's Changed
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ### Docker Images
+            ```bash
+            # Coordinator
+            docker pull cloudless/coordinator:${{ github.ref_name }}
+            docker pull cloudless/coordinator:latest
+
+            # Agent
+            docker pull cloudless/agent:${{ github.ref_name }}
+            docker pull cloudless/agent:latest
+            ```
+
+            ### Installation
+            Download the appropriate binary for your platform and architecture from the assets below.
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.changelog.outputs.PREV_TAG }}...${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
