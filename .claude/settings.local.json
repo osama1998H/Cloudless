@@ -38,7 +38,8 @@
       "Bash(docker-compose:*)",
       "Bash(make build-linux-amd64:*)",
       "Bash(make build-coordinator:*)",
-      "Bash(make build-cli:*)"
+      "Bash(make build-cli:*)",
+      "mcp__MCP_DOCKER__create_issue"
     ],
     "deny": [],
     "ask": []

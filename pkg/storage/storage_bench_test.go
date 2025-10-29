@@ -267,7 +267,12 @@ func BenchmarkChunkVerification(b *testing.B) {
 }
 
 // BenchmarkStorageManager benchmarks the storage manager operations
-// TODO: Update to use current StorageManager API (PutObject/GetObject)
+// TODO(osama): Update benchmark to use current StorageManager API. See issue #22.
+// This benchmark uses the old chunk-based API. Migration required:
+// 1. Replace WriteChunk → PutObject with proper PutObjectRequest
+// 2. Replace ReadChunk → GetObject with proper GetObjectRequest
+// 3. Update benchmark metrics to reflect object-level operations
+// Note: Build tag 'benchmark' excludes this from CI until fixed.
 /* func BenchmarkStorageManagerWrite(b *testing.B) {
 	tmpDir, err := os.MkdirTemp("", "cloudless-bench-manager-*")
 	if err != nil {
@@ -310,8 +315,15 @@ func BenchmarkChunkVerification(b *testing.B) {
 				data.Seek(0, 0) // Reset reader
 				objectID := fmt.Sprintf("bench-object-%d", i)
 
-				// TODO: Update to use PutObject with proper request
-				// err := mgr.PutObject(ctx, &PutObjectRequest{...})
+				// TODO(osama): Update to use PutObject with PutObjectRequest. See issue #22.
+				// Example:
+				// req := &PutObjectRequest{
+				//     Bucket: "benchmark",
+				//     Key: objectID,
+				//     Data: data,
+				//     ContentType: "application/octet-stream",
+				// }
+				// err := mgr.PutObject(ctx, req)
 				// if err != nil {
 				//     b.Fatalf("Write failed: %v", err)
 				// }
@@ -324,7 +336,8 @@ func BenchmarkChunkVerification(b *testing.B) {
 } */
 
 // BenchmarkStorageManagerRead benchmarks reading objects
-// TODO: Update to use current StorageManager API (GetObject)
+// TODO(osama): Update benchmark to use GetObject with GetObjectRequest. See issue #22.
+// Need to migrate from old chunk-based API to current object-level API.
 /* func BenchmarkStorageManagerRead(b *testing.B) {
 	tmpDir, err := os.MkdirTemp("", "cloudless-bench-manager-*")
 	if err != nil {
@@ -361,8 +374,14 @@ func BenchmarkChunkVerification(b *testing.B) {
 			// Setup: write object
 			data := bytes.NewReader(generateRandomData(tt.dataSize))
 			objectID := "bench-read-object"
-			// TODO: Update to use PutObject with proper request
-			// err := mgr.PutObject(ctx, &PutObjectRequest{...})
+			// TODO(osama): Update setup to use PutObject. See issue #22.
+			// req := &PutObjectRequest{
+			//     Bucket: "benchmark",
+			//     Key: objectID,
+			//     Data: data,
+			//     ContentType: "application/octet-stream",
+			// }
+			// err := mgr.PutObject(ctx, req)
 			// if err != nil {
 			//     b.Fatalf("Setup write failed: %v", err)
 			// }
@@ -371,8 +390,12 @@ func BenchmarkChunkVerification(b *testing.B) {
 			b.SetBytes(int64(tt.dataSize))
 
 			for i := 0; i < b.N; i++ {
-				// TODO: Update to use GetObject
-				// _, err := mgr.GetObject(ctx, bucket, key)
+				// TODO(osama): Update to use GetObject with GetObjectRequest. See issue #22.
+				// req := &GetObjectRequest{
+				//     Bucket: "benchmark",
+				//     Key: objectID,
+				// }
+				// resp, err := mgr.GetObject(ctx, req)
 				// if err != nil {
 				//     b.Fatalf("Read failed: %v", err)
 				// }

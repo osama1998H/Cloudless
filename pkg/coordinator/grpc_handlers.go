@@ -168,7 +168,9 @@ func convertNodeInfoToProto(node *membership.NodeInfo) *api.Node {
 			Phase: convertNodeStateToPhase(node.State),
 		},
 		ReliabilityScore: node.ReliabilityScore,
-		LastSeen:         nil, // TODO: add timestamp if available
+		// TODO(osama): Add LastSeen timestamp from membership heartbeat tracking. See issue #18.
+		// The membership manager tracks node heartbeats - expose this via the Node struct.
+		LastSeen:         nil,
 	}
 }
 

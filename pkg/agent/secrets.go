@@ -102,11 +102,14 @@ func (sc *SecretsClient) GetSecret(ctx context.Context, namespace, name, audienc
 	}
 
 	// Step 3: Update cache
+	// TODO(osama): Extract actual TTL from JWT access token instead of hardcoded 1h. See issue #16.
+	// The token contains an 'exp' claim that should be parsed and used for cache expiration.
+	// Current hardcoded value may cause stale secrets or premature expiration.
 	sc.mu.Lock()
 	sc.cache[cacheKey] = &SecretCacheEntry{
 		Data:        data,
 		AccessToken: accessToken,
-		ExpiresAt:   time.Now().Add(1 * time.Hour), // TODO: Get actual TTL from token
+		ExpiresAt:   time.Now().Add(1 * time.Hour), // Hardcoded - should use JWT exp claim
 		Namespace:   namespace,
 		Name:        name,
 		Version:     version,

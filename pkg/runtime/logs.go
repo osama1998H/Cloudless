@@ -24,9 +24,12 @@ func (r *ContainerdRuntime) GetContainerLogs(ctx context.Context, containerID st
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// TODO: Implement proper log streaming
-	// In newer containerd versions, stdio must be managed through cio.Creator at task creation
-	// For MVP, return empty channel - logs can be implemented later
+	// TODO(osama): Implement proper container log streaming. See issue #15.
+	// In newer containerd versions, stdio must be managed through cio.Creator at task creation.
+	// For MVP, we return an empty channel - full implementation requires:
+	// 1. Configure cio.Creator with log file paths at task.Create()
+	// 2. Stream from containerd log files
+	// 3. Support log rotation and retention
 	logCh := make(chan LogEntry, 100)
 
 	go func() {

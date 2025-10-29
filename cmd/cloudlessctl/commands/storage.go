@@ -521,8 +521,12 @@ func runVolumeList(cmd *cobra.Command, args []string) error {
 }
 
 func runVolumeCreate(cmd *cobra.Command, args []string) error {
-	// TODO: Implement persistent volume creation
+	// TODO(osama): Implement persistent volume creation API and CLI command. See issue #20.
 	// The current CreateVolumeRequest API is for container mount volumes,
-	// not persistent volumes. This command needs proper API support.
+	// not persistent volumes. This requires:
+	// 1. Add CreatePersistentVolume RPC to storage service
+	// 2. Support volume types (ReadWriteOnce, ReadWriteMany, ReadOnlyMany)
+	// 3. Implement volume claim binding for workloads
+	// Current workaround: Use container volume mounts in workload spec.
 	return fmt.Errorf("volume create command not yet implemented - use container volume mounts in workload spec")
 }

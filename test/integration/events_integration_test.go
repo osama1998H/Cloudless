@@ -36,12 +36,14 @@ func TestNodeEnrollmentEvents(t *testing.T) {
 	}
 	initialNodeCount := len(listResp.Nodes)
 
-	// TODO: Once event query API is implemented, verify EventNodeEnrolled was recorded
-	// Expected behavior:
-	// 1. Each node in the cluster should have triggered EventNodeEnrolled
-	// 2. Event should contain node ID, zone, capacity metadata
-	// 3. Event actor should be "system" or "admin"
-	// 4. Event timestamp should match enrollment time
+	// TODO(osama): Verify EventNodeEnrolled was recorded once event query API is implemented. See issue #21.
+	// The coordinator emits events but we don't have GetEvents RPC yet.
+	// When implemented, add assertions to verify:
+	// 1. Event type matches EventNodeEnrolled
+	// 2. Event metadata contains node ID, zone, and capacity
+	// 3. Event actor is "system" or "admin"
+	// 4. Event timestamp is within last 5 minutes
+	// Expected: len(events) >= initialNodeCount
 
 	t.Logf("Cluster has %d nodes enrolled (events should be recorded for each)", initialNodeCount)
 
@@ -78,10 +80,11 @@ func TestNodeHealthEvents(t *testing.T) {
 		t.Skip("No nodes available for health testing")
 	}
 
-	// TODO: Once event query API is implemented, verify health events
-	// Expected events when a node fails:
-	// 1. EventNodeOffline - when node stops responding
-	// 2. EventNodeFailed - when health checks fail
+	// TODO(osama): Verify node health events once event query API is implemented. See issue #21.
+	// When implemented, test should:
+	// 1. Query for EventNodeHeartbeat events for healthy nodes
+	// 2. Simulate node failure and verify EventNodeFailed is emitted
+	// 3. Verify EventNodeRecovered when node comes back online
 	// 3. EventNodeRemoved - when node is removed from cluster
 	//
 	// Each event should include:
@@ -148,15 +151,16 @@ func TestSchedulingDecisionEvents(t *testing.T) {
 	// Wait for scheduling to complete
 	time.Sleep(5 * time.Second)
 
-	// TODO: Once event query API is implemented, verify scheduling events
-	// Expected behavior:
-	// 1. EventSchedulingDecision should be recorded with:
-	//    - WorkloadID in ResourceID
-	//    - Selected node ID in metadata
-	//    - Scheduling score in metadata
-	//    - Decision reason (e.g., "best_fit", "locality")
-	// 2. If scheduling fails, EventPlacementFailed should be recorded
-	// 3. Event should have Severity: Info for success, Error for failure
+	// TODO(osama): Verify EventWorkloadScheduled was recorded once event query API is implemented. See issue #21.
+	// When implemented, add assertions to verify:
+	// 1. Event type is EventWorkloadScheduled
+	// 2. Event resource_id matches workloadID
+	// 3. Event metadata contains:
+	//    - selected_node_id: The node where workload was placed
+	//    - scheduling_score: The score used for placement decision
+	//    - decision_reason: Why this node was selected
+	// 4. Event timestamp is recent (within last minute)
+	// Also verify EventWorkloadFailed if placement fails
 
 	t.Logf("Workload %s created (scheduling decision event should be recorded)", workloadID)
 
@@ -175,14 +179,18 @@ func TestSchedulingDecisionEvents(t *testing.T) {
 // TestReschedulingEvents verifies that workload rescheduling triggers events
 // CLD-REQ-071: Event stream records scheduling decisions
 func TestReschedulingEvents(t *testing.T) {
-	t.Skip("TODO: Implement after basic scheduling events work")
-
-	// This test would:
+	// TODO(osama): Implement workload rescheduling event testing. See issue #21.
+	// This test is skipped until EventWorkloadRescheduled and EventSchedulingDecision
+	// events are fully implemented in the coordinator.
+	// Test plan:
 	// 1. Create a workload on a specific node
-	// 2. Drain that node
-	// 3. Verify EventRescheduling is recorded
+	// 2. Drain that node (mark unavailable)
+	// 3. Verify EventWorkloadRescheduled is emitted
 	// 4. Verify workload moves to another node
-	// 5. Verify EventSchedulingDecision for new placement
+	// 5. Verify EventWorkloadScheduled for new placement
+	t.Skip("Skipped until workload rescheduling events are implemented")
+
+	// Future implementation...
 }
 
 // TestPolicyViolationEvents verifies that policy violations trigger events
@@ -222,16 +230,16 @@ func TestPolicyViolationEvents(t *testing.T) {
 
 	_, err = client.CreateWorkload(ctx, createReq)
 
-	// TODO: Once event query API is implemented, verify policy violation events
-	// Expected behavior:
-	// 1. If policy rejects, EventPolicyViolation should be recorded
-	// 2. Event should contain:
-	//    - Workload name in ResourceID
-	//    - Policy name that was violated
-	//    - Violation reason
-	//    - Request details in metadata
-	// 3. Event Severity should be Warning or Error
-	// 4. Event ActorType should identify the user/system that attempted the violation
+	// TODO(osama): Verify EventPolicyViolation was recorded once event query API is implemented. See issue #21.
+	// When implemented, add assertions to verify:
+	// 1. Event type is EventPolicyViolation or EventAdmissionDenied
+	// 2. Event resource_id contains workload name
+	// 3. Event metadata contains:
+	//    - policy_name: Name of violated policy
+	//    - violation_reason: Why policy rejected the request
+	//    - requested_privilege: What was requested (e.g., "privileged: true")
+	// 4. Event severity is Warning or Error
+	// 5. Event actor identifies the requester
 
 	if err != nil {
 		t.Logf("Workload creation rejected (expected): %v", err)
@@ -248,18 +256,18 @@ func TestPolicyViolationEvents(t *testing.T) {
 // TestAuthenticationEvents verifies that authentication attempts trigger events
 // CLD-REQ-071: Event stream records security decisions
 func TestAuthenticationEvents(t *testing.T) {
-	// TODO: Once mTLS authentication events are implemented
-	// Expected behavior:
-	// 1. Successful authentication triggers EventAuthenticationSuccess
-	// 2. Failed authentication triggers EventAuthenticationFailed
-	// 3. Events include:
-	//    - Actor ID (certificate CN or username)
-	//    - Actor type (node, user, service)
-	//    - Authentication method (mTLS, JWT, etc.)
-	//    - Source IP address in metadata
-	// 4. Failed attempts include failure reason
+	// TODO(osama): Implement authentication event testing once mTLS auth events are emitted. See issue #21.
+	// When implemented, test should verify:
+	// 1. EventAuthSuccess is emitted for valid mTLS certificates
+	// 2. EventAuthFailure is emitted for invalid/expired certificates
+	// 3. Events contain:
+	//    - actor: Certificate CN or JWT subject
+	//    - actor_type: node, user, or service
+	//    - auth_method: mTLS, JWT, or API key
+	//    - source_ip: Client IP address
+	// 4. Failed events include failure_reason metadata
 
-	t.Skip("TODO: Implement authentication event testing")
+	t.Skip("Skipped until authentication events are implemented")
 }
 
 // TestWorkloadLifecycleEvents verifies that workload lifecycle triggers events
@@ -301,8 +309,9 @@ func TestWorkloadLifecycleEvents(t *testing.T) {
 
 	workloadID := workload.Id
 
-	// TODO: Update workload to trigger EventWorkloadUpdated
-	// TODO: Scale workload to trigger EventWorkloadScaled
+	// TODO(osama): Update workload to trigger EventWorkloadUpdated. See issue #21.
+	// TODO(osama): Scale workload to trigger EventWorkloadScaled. See issue #21.
+	// These operations need UpdateWorkload and ScaleWorkload RPCs to be implemented.
 
 	// Delete workload
 	_, err = client.DeleteWorkload(ctx, &api.DeleteWorkloadRequest{WorkloadId: workloadID})
@@ -310,19 +319,15 @@ func TestWorkloadLifecycleEvents(t *testing.T) {
 		t.Fatalf("Failed to delete workload: %v", err)
 	}
 
-	// TODO: Once event query API is implemented, verify lifecycle events
-	// Expected events in order:
-	// 1. EventWorkloadCreated - when CreateWorkload is called
-	// 2. EventWorkloadScheduled - when scheduler places workload
-	// 3. EventWorkloadUpdated - when UpdateWorkload is called (if implemented)
-	// 4. EventWorkloadScaled - when replicas change (if implemented)
-	// 5. EventWorkloadDeleted - when DeleteWorkload is called
-	//
-	// Each event should include:
-	// - Workload ID in ResourceID
-	// - Workload name in metadata
-	// - Relevant state changes in metadata
-	// - Correlation ID linking related events
+	// TODO(osama): Verify workload lifecycle events once event query API is implemented. See issue #21.
+	// When implemented, query events and assert:
+	// 1. EventWorkloadScheduled - When workload is placed on a node
+	// 2. EventWorkloadStarted - When container starts running
+	// 3. EventWorkloadStopped - When DeleteWorkload is called
+	// Future events to implement:
+	// 4. EventWorkloadUpdated - When spec is modified (needs UpdateWorkload RPC)
+	// 5. EventWorkloadScaled - When replicas change (needs ScaleWorkload RPC)
+	// All events should share a correlation_id and include workload_id in resource_id.
 
 	t.Logf("Workload lifecycle completed (events should be recorded for create, schedule, delete)")
 }
@@ -330,34 +335,45 @@ func TestWorkloadLifecycleEvents(t *testing.T) {
 // TestLeaderElectionEvents verifies that RAFT leader election triggers events
 // CLD-REQ-071: Event stream records coordinator decisions
 func TestLeaderElectionEvents(t *testing.T) {
-	t.Skip("TODO: Implement leader election event testing")
+	// TODO(osama): Implement leader election event testing. See issue #21.
+	// Test plan:
+	// 1. Query current RAFT leader
+	// 2. Verify EventLeaderElected was recorded at coordinator startup
+	// 3. If multiple coordinators, stop the leader
+	// 4. Verify EventLeaderStepDown is emitted
+	// 5. Verify new EventLeaderElected is emitted for new leader
+	// Events should include coordinator_id, term, and timestamp.
+	t.Skip("Skipped until leader election events are implemented")
 
-	// This test would:
-	// 1. Query current leader
-	// 2. Verify EventLeaderElected was recorded at startup
-	// 3. If multiple coordinators, stop leader
-	// 4. Verify EventLeaderStepDown is recorded
-	// 5. Verify new EventLeaderElected is recorded
+	// Future implementation...
 }
 
 // TestEventFiltering verifies event query filtering works correctly
 // CLD-REQ-071: Event stream should support filtering by type, severity, resource
 func TestEventFiltering(t *testing.T) {
-	t.Skip("TODO: Implement once GetEvents API is available")
+	// TODO(osama): Implement event filtering tests once GetEvents API is available. See issue #21.
+	// Test plan:
+	// 1. Create multiple events of different types
+	// 2. Query with event_types filter - verify only matching types returned
+	// 3. Query with resource_id filter - verify only events for that resource
+	// 4. Query with time range filter - verify only events in range
+	// 5. Combine multiple filters - verify AND logic works correctly
+	t.Skip("Skipped until GetEvents API is implemented")
 
-	// This test would verify:
-	// 1. Filter by event type (e.g., only scheduling events)
-	// 2. Filter by severity (e.g., only errors)
-	// 3. Filter by resource ID (e.g., events for specific workload)
-	// 4. Filter by time range (e.g., last hour)
-	// 5. Filter by correlation ID (e.g., all events from one request)
-	// 6. Multiple filters combined (AND logic)
+	// Future implementation...
 }
 
 // TestEventCorrelation verifies that related events share correlation IDs
 // CLD-REQ-071: Event stream should support correlation across operations
 func TestEventCorrelation(t *testing.T) {
-	t.Skip("TODO: Implement once GetEvents API is available")
+	// TODO(osama): Implement event correlation testing once GetEvents API is available. See issue #21.
+	// Test plan:
+	// 1. Create a workload (generates multiple events)
+	// 2. Query events for that operation
+	// 3. Verify all related events share the same correlation_id
+	// 4. Verify events are ordered chronologically
+	// 5. Use correlation_id to trace entire request flow
+	t.Skip("Skipped until GetEvents API is implemented")
 
 	// This test would verify:
 	// 1. Create workload with correlation ID in context

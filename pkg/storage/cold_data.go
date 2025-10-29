@@ -228,8 +228,10 @@ func (cdm *ColdDataManager) EncodeWithEC(ctx context.Context, bucket, key string
 		return fmt.Errorf("failed to update object metadata: %w", err)
 	}
 
-	// TODO: Delete old replicated chunks (Phase 4)
-	// For now, keep them for safety
+	// TODO(osama): Implement garbage collection for old replicated chunks. See issue #19.
+	// After erasure coding an object, the original replicated chunks should be deleted
+	// to reclaim storage. This is Phase 4 of the cold data implementation (CLD-REQ-041).
+	// For now, keep them for safety during testing.
 
 	cdm.logger.Info("Encoded object with erasure coding",
 		zap.String("bucket", bucket),

@@ -213,7 +213,9 @@ func (s *SecretsServiceServer) UpdateSecret(ctx context.Context, req *api.Update
 	}
 
 	// Update secret (note: UpdateSecret currently doesn't support options like audiences)
-	// TODO: Extend UpdateSecret to support audience and label updates via options
+	// TODO(osama): Extend UpdateSecret to support audience and label updates. See issue #17.
+	// Current implementation only updates secret data. To fully support secret lifecycle
+	// management, we need UpdateSecretOptions with AudiencesToAdd/Remove and LabelsToUpdate.
 	secret, err := s.coordinator.secretsManager.UpdateSecret(req.Namespace, req.Name, data)
 	if err != nil {
 		s.logger.Error("Failed to update secret",
@@ -303,7 +305,8 @@ func (s *SecretsServiceServer) ListSecrets(ctx context.Context, req *api.ListSec
 		Prefix:    req.NamePrefix,
 		Labels:    req.LabelSelector,
 		Limit:     int(req.Limit),
-		// TODO: Implement continuation token support for pagination
+		// TODO(osama): Implement continuation token support for pagination. See issue #17.
+		// Need cursor-based pagination with opaque continuation tokens.
 	}
 
 	// List secrets
@@ -331,9 +334,11 @@ func (s *SecretsServiceServer) ListSecrets(ctx context.Context, req *api.ListSec
 		metadataList[i] = protoMetadata
 	}
 
+	// TODO(osama): Implement next_token for pagination. See issue #17.
+	// Need to return continuation token for next page of results.
 	return &api.ListSecretsResponse{
 		Secrets: metadataList,
-		// TODO: Implement next_token for pagination
+		// NextToken: "", // To be implemented
 	}, nil
 }
 
@@ -424,7 +429,8 @@ func (s *SecretsServiceServer) RevokeAccessToken(ctx context.Context, req *api.R
 			return nil, status.Error(codes.InvalidArgument, "token ID is required")
 		}
 
-		// TODO: Add RevokeAccessToken method to Manager or expose TokenManager
+		// TODO(osama): Add RevokeAccessToken method to Manager or expose TokenManager. See issue #17.
+		// Need to implement token blacklist in BoltDB with TTL-based cleanup.
 		// For now, return unimplemented
 		s.logger.Warn("Token revocation not yet implemented",
 			zap.String("token_id", target.TokenId),
@@ -437,7 +443,8 @@ func (s *SecretsServiceServer) RevokeAccessToken(ctx context.Context, req *api.R
 			return nil, status.Error(codes.InvalidArgument, "secret ref is required")
 		}
 
-		// TODO: Add RevokeTokensForSecret method to Manager
+		// TODO(osama): Add RevokeTokensForSecret method to Manager. See issue #17.
+		// Need to revoke all tokens associated with a secret namespace/name.
 		s.logger.Warn("Secret token revocation not yet implemented",
 			zap.String("secret_ref", target.SecretRef),
 		)
@@ -507,11 +514,12 @@ func (s *SecretsServiceServer) RotateMasterKey(ctx context.Context, req *api.Rot
 
 	s.logger.Info("Master key rotated successfully")
 
+	// TODO(osama): Track number of secrets re-encrypted during rotation. See issue #17.
+	// Add Prometheus metrics and progress logging for re-encryption operations.
 	return &api.RotateMasterKeyResponse{
 		OldKey: oldProtoKey,
 		NewKey: newProtoKey,
-		// TODO: Track number of secrets re-encrypted
-		SecretsReEncrypted: 0,
+		SecretsReEncrypted: 0, // To be implemented
 	}, nil
 }
 
@@ -592,9 +600,11 @@ func (s *SecretsServiceServer) GetSecretAuditLog(ctx context.Context, req *api.G
 		}
 	}
 
-	// TODO: Implement pagination with continue_token and next_token
+	// TODO(osama): Implement pagination with continue_token and next_token. See issue #17.
+	// Audit logs can grow large - need cursor-based pagination similar to ListSecrets.
 	return &api.GetSecretAuditLogResponse{
 		Entries:   protoEntries,
+		// NextToken: "", // To be implemented
 		NextToken: "", // Not implemented yet
 	}, nil
 }
