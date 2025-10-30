@@ -122,7 +122,7 @@ All requirements have IDs for traceability.
 * NFR‑S1 Security: No unauthenticated endpoints; pass CIS‑style baseline checks for Linux hosts.
 * NFR‑R1 Reliability: No single point of failure other than the chosen anchor VPS in v0.x; document failover options.
 * NFR‑C1 Compliance: Provide audit log and deterministic config for reproducibility.
-* NFR‑M1 Maintainability: Go 1.23+, static binaries, minimal external deps.
+* NFR‑M1 Maintainability: Go 1.24+, static binaries, minimal external deps.
 * NFR‑U1 Usability: First app deployed within 10 minutes following the quickstart.
 
 ## 9. Data Model (Sketch)

@@ -43,7 +43,13 @@
       "Read(//Users/osamamuhammed/.cloudless/**)",
       "Bash(./build/cloudlessctl:*)",
       "WebSearch",
-      "mcp__MCP_DOCKER__get_issue"
+      "mcp__MCP_DOCKER__get_issue",
+      "Bash(make lint:*)",
+      "Bash(~/go/bin/golangci-lint run:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh api:*)",
+      "Bash(gh pr view:*)",
+      "Read(//Users/osamamuhammed/go/bin/**)"
     ],
     "deny": [],
     "ask": []
