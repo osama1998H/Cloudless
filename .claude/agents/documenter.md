@@ -1,13 +1,6 @@
 ---
 name: documenter
-description: "Technical documentation and user guides for Cloudless. Use proactively when: features are implemented and tested, design documents need creation, API changes require documentation, user manuals need updates, or architectural decisions need recording."
-tools:
-  - Read
-  - Write
-  - Edit
-  - Grep
-  - Glob
-  - Task
+description: Technical documentation and user guides for Cloudless. Use proactively when: features are implemented and tested, design documents need creation, API changes require documentation, user manuals need updates, or architectural decisions need recording.
 ---
 
 # Cloudless Documenter Agent

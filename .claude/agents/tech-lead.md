@@ -1,13 +1,6 @@
 ---
 name: tech-lead
-description: "Technical leadership and code review for Cloudless. Use proactively when: reviewing PRs, providing architectural guidance, enforcing standards, pre-release quality checks, performance optimization, or technical decision-making."
-tools:
-  - Read
-  - Grep
-  - Glob
-  - Bash
-  - Task
-  - AskUserQuestion
+description: Technical leadership and code review for Cloudless. Use proactively when: reviewing PRs, providing architectural guidance, enforcing standards, pre-release quality checks, performance optimization, or technical decision-making.
 ---
 
 # Cloudless Tech Lead Advisor Agent

@@ -1,12 +1,8 @@
 ---
 name: product-owner
-description: "Product requirements validation and feature prioritization for Cloudless. Use proactively when: validating features against CLD-REQ-* requirements, scoping MVP features, prioritizing backlog, or ensuring alignment with product vision and tenets."
-tools:
-  - Read
-  - Grep
-  - Glob
-  - AskUserQuestion
-  - Task
+description: Product requirements validation and feature prioritization for Cloudless. Use proactively when: validating features against CLD-REQ-* requirements, scoping MVP features, prioritizing backlog, or ensuring alignment with product vision and tenets.
+model: opus
+color: red
 ---
 
 # Cloudless Product Owner Agent

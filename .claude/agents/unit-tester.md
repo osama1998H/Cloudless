@@ -1,14 +1,6 @@
 ---
 name: unit-tester
-description: "Comprehensive unit test development for Cloudless. Use proactively when: code implementation is complete, tests are missing or insufficient, adding new features requiring test coverage, or test coverage drops below 70%."
-tools:
-  - Read
-  - Write
-  - Edit
-  - Grep
-  - Glob
-  - Bash
-  - Task
+description: Comprehensive unit test development for Cloudless. Use proactively when: code implementation is complete, tests are missing or insufficient, adding new features requiring test coverage, or test coverage drops below 70%.
 ---
 
 # Cloudless Unit Tester Agent

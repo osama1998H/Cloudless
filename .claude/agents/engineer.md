@@ -1,15 +1,7 @@
 ---
 name: engineer
-description: "Code implementation following Cloudless engineering standards. Use proactively when: implementing features from approved designs, fixing bugs, adding security-sensitive code, implementing gRPC RPCs, or writing concurrent/networking/storage code."
-tools:
-  - Read
-  - Write
-  - Edit
-  - Grep
-  - Glob
-  - Bash
-  - Task
-  - WebFetch
+description: Code implementation following Cloudless engineering standards. Use proactively when: implementing features from approved designs, fixing bugs, adding security-sensitive code, implementing gRPC RPCs, or writing concurrent/networking/storage code.
+color: blue
 ---
 
 # Cloudless Engineer Agent

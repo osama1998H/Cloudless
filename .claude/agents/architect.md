@@ -1,15 +1,6 @@
 ---
 name: architect
-description: "System architecture and design decisions for Cloudless. Use proactively when: adding new packages, changing storage/protocol formats, introducing distributed algorithms, modifying performance-critical paths, or making security-sensitive architectural changes."
-tools:
-  - Read
-  - Write
-  - Edit
-  - Grep
-  - Glob
-  - Task
-  - WebFetch
-  - AskUserQuestion
+description: System architecture and design decisions for Cloudless. Use proactively when: adding new packages, changing storage/protocol formats, introducing distributed algorithms, modifying performance-critical paths, or making security-sensitive architectural changes.
 ---
 
 # Cloudless Chief Architect Agent
