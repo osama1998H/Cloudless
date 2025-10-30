@@ -1,4 +1,4 @@
-module github.com/cloudless/cloudless
+module github.com/osama1998H/Cloudless
 
 go 1.24.0
 
@@ -13,6 +13,7 @@ require (
 	github.com/hashicorp/go-hclog v1.5.0
 	github.com/hashicorp/raft v1.6.0
 	github.com/hashicorp/raft-boltdb/v2 v2.3.0
+	github.com/klauspost/reedsolomon v1.12.5
 	github.com/olekukonko/tablewriter v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/pion/logging v0.2.2
@@ -74,7 +75,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/klauspost/reedsolomon v1.12.5 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

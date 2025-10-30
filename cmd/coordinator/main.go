@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/coordinator"
-	"github.com/cloudless/cloudless/pkg/observability"
+	"github.com/osama1998H/Cloudless/pkg/coordinator"
+	"github.com/osama1998H/Cloudless/pkg/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

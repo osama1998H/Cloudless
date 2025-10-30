@@ -186,7 +186,7 @@ type GPUStats struct {
 type LogEntry struct {
 	Timestamp time.Time
 	Stream    string // stdout or stderr
-	Log       string
+	Line      string
 }
 
 // ExecConfig defines configuration for executing a command in a container

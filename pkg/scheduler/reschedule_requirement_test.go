@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/coordinator/membership"
+	"github.com/osama1998H/Cloudless/pkg/coordinator/membership"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

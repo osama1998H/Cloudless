@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/api"
-	"github.com/cloudless/cloudless/pkg/coordinator"
-	"github.com/cloudless/cloudless/pkg/scheduler"
+	"github.com/osama1998H/Cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/pkg/coordinator"
+	"github.com/osama1998H/Cloudless/pkg/scheduler"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

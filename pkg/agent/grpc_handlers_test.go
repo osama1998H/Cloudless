@@ -3,17 +3,17 @@ package agent
 import (
 	"context"
 	"errors"
-	"io"
 	"testing"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/api"
-	"github.com/cloudless/cloudless/pkg/runtime"
+	"github.com/osama1998H/Cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/pkg/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // mockRuntime implements runtime.ContainerRuntime interface for testing
@@ -106,7 +106,7 @@ func TestStreamLogs(t *testing.T) {
 			request: &api.StreamLogsRequest{
 				ContainerId: "test-container-123",
 				Follow:      false,
-				Tail:        0,
+				TailLines:   0,
 			},
 			setupMock: func(m *mockRuntime) {
 				m.getContainerLogsFn = func(ctx context.Context, containerID string, follow bool) (<-chan runtime.LogEntry, error) {
@@ -117,17 +117,17 @@ func TestStreamLogs(t *testing.T) {
 						logCh <- runtime.LogEntry{
 							Timestamp: time.Now(),
 							Stream:    "stdout",
-							Log:       "Starting application...",
+							Line:      "Starting application...",
 						}
 						logCh <- runtime.LogEntry{
 							Timestamp: time.Now(),
 							Stream:    "stdout",
-							Log:       "Server listening on port 8080",
+							Line:      "Server listening on port 8080",
 						}
 						logCh <- runtime.LogEntry{
 							Timestamp: time.Now(),
 							Stream:    "stderr",
-							Log:       "Warning: Debug mode enabled",
+							Line:      "Warning: Debug mode enabled",
 						}
 					}()
 
@@ -137,10 +137,10 @@ func TestStreamLogs(t *testing.T) {
 			wantErr: false,
 			checkLogs: func(t *testing.T, logs []*api.LogEntry) {
 				assert.Len(t, logs, 3)
-				assert.Equal(t, "Starting application...", logs[0].Log)
+				assert.Equal(t, "Starting application...", logs[0].Line)
 				assert.Equal(t, "stdout", logs[0].Stream)
-				assert.Equal(t, "Server listening on port 8080", logs[1].Log)
-				assert.Equal(t, "Warning: Debug mode enabled", logs[2].Log)
+				assert.Equal(t, "Server listening on port 8080", logs[1].Line)
+				assert.Equal(t, "Warning: Debug mode enabled", logs[2].Line)
 				assert.Equal(t, "stderr", logs[2].Stream)
 			},
 		},
@@ -149,7 +149,7 @@ func TestStreamLogs(t *testing.T) {
 			request: &api.StreamLogsRequest{
 				ContainerId: "test-container",
 				Follow:      false,
-				Tail:        10,
+				TailLines:   10,
 			},
 			setupMock: func(m *mockRuntime) {
 				m.getContainerLogsFn = func(ctx context.Context, containerID string, follow bool) (<-chan runtime.LogEntry, error) {
@@ -161,7 +161,7 @@ func TestStreamLogs(t *testing.T) {
 							logCh <- runtime.LogEntry{
 								Timestamp: time.Now(),
 								Stream:    "stdout",
-								Log:       "Log line " + string(rune('0'+i)),
+								Line:      "Log line " + string(rune('0'+i)),
 							}
 						}
 					}()
@@ -180,7 +180,7 @@ func TestStreamLogs(t *testing.T) {
 			request: &api.StreamLogsRequest{
 				ContainerId: "test-container",
 				Follow:      true,
-				Tail:        0,
+				TailLines:   0,
 			},
 			setupMock: func(m *mockRuntime) {
 				m.getContainerLogsFn = func(ctx context.Context, containerID string, follow bool) (<-chan runtime.LogEntry, error) {
@@ -197,7 +197,7 @@ func TestStreamLogs(t *testing.T) {
 							case logCh <- runtime.LogEntry{
 								Timestamp: time.Now(),
 								Stream:    "stdout",
-								Log:       "Real-time log entry",
+								Line:      "Real-time log entry",
 							}:
 								time.Sleep(10 * time.Millisecond)
 							}
@@ -217,7 +217,7 @@ func TestStreamLogs(t *testing.T) {
 			request: &api.StreamLogsRequest{
 				ContainerId: "test-container",
 				Follow:      false,
-				SinceTime:   time.Now().Add(-1 * time.Hour).Unix(),
+				Since:       timestamppb.New(time.Now().Add(-1 * time.Hour)),
 			},
 			setupMock: func(m *mockRuntime) {
 				m.getContainerLogsFn = func(ctx context.Context, containerID string, follow bool) (<-chan runtime.LogEntry, error) {
@@ -229,13 +229,13 @@ func TestStreamLogs(t *testing.T) {
 						logCh <- runtime.LogEntry{
 							Timestamp: time.Now(),
 							Stream:    "stdout",
-							Log:       "Recent log",
+							Line:      "Recent log",
 						}
 						// Old log (should be filtered by client if needed)
 						logCh <- runtime.LogEntry{
 							Timestamp: time.Now().Add(-2 * time.Hour),
 							Stream:    "stdout",
-							Log:       "Old log",
+							Line:      "Old log",
 						}
 					}()
 
@@ -296,7 +296,7 @@ func TestStreamLogs(t *testing.T) {
 							case logCh <- runtime.LogEntry{
 								Timestamp: time.Now(),
 								Stream:    "stdout",
-								Log:       "streaming...",
+								Line:      "streaming...",
 							}:
 								time.Sleep(100 * time.Millisecond)
 							}
@@ -594,7 +594,7 @@ func TestConcurrentStreamLogs(t *testing.T) {
 				case logCh <- runtime.LogEntry{
 					Timestamp: time.Now(),
 					Stream:    "stdout",
-					Log:       "concurrent log entry",
+					Line:      "concurrent log entry",
 				}:
 					time.Sleep(5 * time.Millisecond)
 				}

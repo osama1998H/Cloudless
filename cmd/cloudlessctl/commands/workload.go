@@ -11,8 +11,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"gopkg.in/yaml.v3"
 
-	"github.com/cloudless/cloudless/cmd/cloudlessctl/config"
-	"github.com/cloudless/cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/cmd/cloudlessctl/config"
+	"github.com/osama1998H/Cloudless/pkg/api"
 )
 
 // YAML manifest structures for Kubernetes-style workload definitions
