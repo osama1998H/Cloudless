@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/cloudless/cloudless/pkg/api"
+	"github.com/cloudless/cloudless/pkg/secrets"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -57,6 +59,30 @@ func NewSecretsClient(client api.SecretsServiceClient, logger *zap.Logger) *Secr
 	return sc
 }
 
+// extractTokenExpiration parses a JWT token and extracts its expiration time.
+// This function parses the token without validating the signature since the
+// coordinator has already validated it during generation.
+func extractTokenExpiration(tokenString string) (time.Time, error) {
+	// Parse token without validation to extract claims
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+
+	token, _, err := parser.ParseUnverified(tokenString, &secrets.SecretTokenClaims{})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse JWT token: %w", err)
+	}
+
+	claims, ok := token.Claims.(*secrets.SecretTokenClaims)
+	if !ok {
+		return time.Time{}, fmt.Errorf("invalid token claims type")
+	}
+
+	if claims.ExpiresAt == nil {
+		return time.Time{}, fmt.Errorf("token missing expiration claim")
+	}
+
+	return claims.ExpiresAt.Time, nil
+}
+
 // GetSecret retrieves a secret from the coordinator with caching
 func (sc *SecretsClient) GetSecret(ctx context.Context, namespace, name, audience string) (map[string][]byte, error) {
 	cacheKey := fmt.Sprintf("%s/%s/%s", namespace, name, audience)
@@ -101,15 +127,23 @@ func (sc *SecretsClient) GetSecret(ctx context.Context, namespace, name, audienc
 		return nil, err
 	}
 
-	// Step 3: Update cache
-	// TODO(osama): Extract actual TTL from JWT access token instead of hardcoded 1h. See issue #16.
-	// The token contains an 'exp' claim that should be parsed and used for cache expiration.
-	// Current hardcoded value may cause stale secrets or premature expiration.
+	// Step 3: Update cache with token expiration
+	expiresAt, err := extractTokenExpiration(accessToken)
+	if err != nil {
+		// Log warning but don't fail - fall back to default TTL
+		sc.logger.Warn("Failed to extract token expiration, using default TTL",
+			zap.Error(err),
+			zap.String("namespace", namespace),
+			zap.String("name", name),
+		)
+		expiresAt = time.Now().Add(1 * time.Hour)
+	}
+
 	sc.mu.Lock()
 	sc.cache[cacheKey] = &SecretCacheEntry{
 		Data:        data,
 		AccessToken: accessToken,
-		ExpiresAt:   time.Now().Add(1 * time.Hour), // Hardcoded - should use JWT exp claim
+		ExpiresAt:   expiresAt,
 		Namespace:   namespace,
 		Name:        name,
 		Version:     version,
