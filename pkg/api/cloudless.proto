@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package cloudless.api.v1;
 
-option go_package = "github.com/cloudless/cloudless/pkg/api;api";
+option go_package = "github.com/osama1998H/Cloudless/pkg/api;api";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";

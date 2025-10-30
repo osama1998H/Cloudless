@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/api"
-	"github.com/cloudless/cloudless/pkg/secrets"
+	"github.com/osama1998H/Cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/pkg/secrets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

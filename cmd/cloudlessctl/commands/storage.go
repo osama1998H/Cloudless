@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	cmdconfig "github.com/cloudless/cloudless/cmd/cloudlessctl/config"
-	"github.com/cloudless/cloudless/pkg/api"
+	cmdconfig "github.com/osama1998H/Cloudless/cmd/cloudlessctl/config"
+	"github.com/osama1998H/Cloudless/pkg/api"
 	"github.com/spf13/cobra"
 )
 

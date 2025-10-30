@@ -1,7 +1,7 @@
 package fixtures
 
 import (
-	"github.com/cloudless/cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/pkg/api"
 )
 
 // NewTestWorkload creates a basic workload for testing

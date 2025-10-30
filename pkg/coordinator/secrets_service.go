@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudless/cloudless/pkg/api"
-	"github.com/cloudless/cloudless/pkg/secrets"
+	"github.com/osama1998H/Cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/pkg/secrets"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/cloudless/cloudless/cmd/cloudlessctl/config"
-	"github.com/cloudless/cloudless/pkg/api"
+	"github.com/osama1998H/Cloudless/cmd/cloudlessctl/config"
+	"github.com/osama1998H/Cloudless/pkg/api"
 )
 
 // NewNodeCommand creates the node command

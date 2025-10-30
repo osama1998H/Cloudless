@@ -99,7 +99,7 @@ func (r *ContainerdRuntime) streamLogs(ctx context.Context, reader io.Reader, st
 			entry := LogEntry{
 				Timestamp: time.Now(),
 				Stream:    stream,
-				Log:       scanner.Text(),
+				Line:      scanner.Text(),
 			}
 
 			select {
