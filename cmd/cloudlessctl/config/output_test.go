@@ -199,8 +199,8 @@ func TestOutputter_PrintYAML(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name: "array",
-			data: []string{"item1", "item2", "item3"},
+			name:     "array",
+			data:     []string{"item1", "item2", "item3"},
 			wantYAML: "- item1\n- item2\n- item3\n",
 			wantErr:  false,
 		},

@@ -253,9 +253,9 @@ func TestInputValidation_SecretName(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
+		name       string
 		secretName string
-		wantErr   bool
+		wantErr    bool
 	}{
 		{"valid name", "my-secret", false},
 		{"valid with numbers", "secret-123", false},
@@ -434,12 +434,12 @@ func TestAccessTokenExpiration(t *testing.T) {
 	dataDir := t.TempDir()
 	signingKey := generateRandomKey(32)
 	config := &Config{
-		MasterKey:        generateRandomKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  signingKey,
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateRandomKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: signingKey,
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -457,11 +457,11 @@ func TestAccessTokenExpiration(t *testing.T) {
 	// Create expired token (issued in the past, already expired)
 	now := time.Now()
 	expiredClaims := jwt.MapClaims{
-		"jti": "test-token-id",
-		"sub": "test/secret",
-		"aud": "test-service",
-		"iat": jwt.NewNumericDate(now.Add(-3600 * time.Second)),   // 1 hour ago
-		"exp": jwt.NewNumericDate(now.Add(-1800 * time.Second)),   // 30 min ago (expired)
+		"jti":  "test-token-id",
+		"sub":  "test/secret",
+		"aud":  "test-service",
+		"iat":  jwt.NewNumericDate(now.Add(-3600 * time.Second)), // 1 hour ago
+		"exp":  jwt.NewNumericDate(now.Add(-1800 * time.Second)), // 30 min ago (expired)
 		"uses": 10,
 	}
 
@@ -489,12 +489,12 @@ func TestRateLimiting_TokenGeneration(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateRandomKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateRandomKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateRandomKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateRandomKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -566,12 +566,12 @@ func TestAudienceMismatch(t *testing.T) {
 	dataDir := t.TempDir()
 	signingKey := generateRandomKey(32)
 	config := &Config{
-		MasterKey:        generateRandomKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  signingKey,
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateRandomKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: signingKey,
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)

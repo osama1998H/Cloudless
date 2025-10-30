@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,24 +20,53 @@ func (r *ContainerdRuntime) GetContainerLogs(ctx context.Context, containerID st
 		return nil, fmt.Errorf("failed to load container: %w", err)
 	}
 
+	// Verify container has a task (is running or has run)
 	_, err = container.Task(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// TODO(osama): Implement proper container log streaming. See issue #15.
-	// In newer containerd versions, stdio must be managed through cio.Creator at task creation.
-	// For MVP, we return an empty channel - full implementation requires:
-	// 1. Configure cio.Creator with log file paths at task.Create()
-	// 2. Stream from containerd log files
-	// 3. Support log rotation and retention
+	// Get log path from container labels
+	labels, err := container.Labels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container labels: %w", err)
+	}
+
+	logPath, ok := labels["cloudless.log_path"]
+	if !ok || logPath == "" {
+		// Fallback to default log path
+		logPath = fmt.Sprintf("/var/log/cloudless/containers/%s.log", containerID)
+		r.logger.Warn("Log path not found in labels, using default",
+			zap.String("container_id", containerID),
+			zap.String("log_path", logPath))
+	}
+
+	// Open log file
+	file, err := os.Open(logPath)
+	if err != nil {
+		// Log file not found - container may not have produced logs yet
+		r.logger.Warn("Log file not found, returning empty stream",
+			zap.String("container_id", containerID),
+			zap.String("log_path", logPath),
+			zap.Error(err))
+
+		logCh := make(chan LogEntry, 100)
+		go func() {
+			defer close(logCh)
+			<-ctx.Done()
+		}()
+		return logCh, nil
+	}
+
+	// Create buffered channel for log entries
 	logCh := make(chan LogEntry, 100)
 
+	// Start goroutine to stream logs
 	go func() {
 		defer close(logCh)
-		r.logger.Warn("Container log streaming not yet implemented",
-			zap.String("container_id", containerID))
-		<-ctx.Done()
+		defer file.Close()
+
+		r.streamLogs(ctx, file, "stdout", logCh, follow)
 	}()
 
 	return logCh, nil

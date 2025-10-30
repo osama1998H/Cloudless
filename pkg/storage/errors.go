@@ -39,8 +39,8 @@ func GetLeaderAddress(err error) string {
 
 // TimeoutError indicates a RAFT operation timed out
 type TimeoutError struct {
-	Operation string        // Operation that timed out
-	Duration  string        // How long we waited
+	Operation string // Operation that timed out
+	Duration  string // How long we waited
 }
 
 // Error implements the error interface

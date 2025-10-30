@@ -385,8 +385,32 @@ func (r *ContainerdRuntime) StartContainer(ctx context.Context, containerID stri
 		return fmt.Errorf("failed to load container: %w", err)
 	}
 
-	// Create task
-	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
+	// Create log file path for this container
+	logPath := fmt.Sprintf("/var/log/cloudless/containers/%s.log", containerID)
+
+	// Store log path in container labels for retrieval
+	labels, err := container.Labels(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get container labels: %w", err)
+	}
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels["cloudless.log_path"] = logPath
+
+	// Update container with log path label
+	if err := container.Update(ctx, func(ctx context.Context, client *containerd.Client, c *containers.Container) error {
+		c.Labels = labels
+		return nil
+	}); err != nil {
+		r.logger.Warn("Failed to update container labels with log path",
+			zap.String("id", containerID),
+			zap.Error(err))
+	}
+
+	// Create task with log file redirection
+	// Use cio.NewCreator with cio.WithTerminal and log file configuration
+	task, err := container.NewTask(ctx, cio.LogFile(logPath))
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -400,6 +424,7 @@ func (r *ContainerdRuntime) StartContainer(ctx context.Context, containerID stri
 	r.logger.Info("Container started successfully",
 		zap.String("id", containerID),
 		zap.Uint32("pid", task.Pid()),
+		zap.String("log_path", logPath),
 	)
 
 	return nil

@@ -517,16 +517,16 @@ func (re *RepairEngine) CompareMerkleTrees(tree1, tree2 *MerkleTree) []string {
 
 // RepairMetrics contains repair statistics
 type RepairMetrics struct {
-	ChunksChecked       int64
-	ReplicasRepaired    int64
-	CorruptionsFixed    int64
-	StaleReplicasFixed  int64
-	TasksCompleted      int64
-	TasksFailed         int64
-	LastCheckTime       time.Time
-	ECObjectsChecked    int64 // CLD-REQ-053: Erasure coded objects checked
-	ECShardsRepaired    int64 // CLD-REQ-053: Shards reconstructed
-	ECDegradedReads     int64 // CLD-REQ-053: Reads requiring reconstruction
+	ChunksChecked      int64
+	ReplicasRepaired   int64
+	CorruptionsFixed   int64
+	StaleReplicasFixed int64
+	TasksCompleted     int64
+	TasksFailed        int64
+	LastCheckTime      time.Time
+	ECObjectsChecked   int64 // CLD-REQ-053: Erasure coded objects checked
+	ECShardsRepaired   int64 // CLD-REQ-053: Shards reconstructed
+	ECDegradedReads    int64 // CLD-REQ-053: Reads requiring reconstruction
 }
 
 // checkECObjectHealth checks if an erasure coded object has sufficient shards

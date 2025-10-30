@@ -13,39 +13,39 @@ func TestErasureEncoder_Encode(t *testing.T) {
 	logger := zap.NewNop()
 
 	tests := []struct {
-		name          string
-		dataShards    int
-		parityShards  int
-		dataSize      int
-		expectError   bool
+		name         string
+		dataShards   int
+		parityShards int
+		dataSize     int
+		expectError  bool
 	}{
 		{
-			name:          "Valid 4+2 encoding",
-			dataShards:    4,
-			parityShards:  2,
-			dataSize:      1024,
-			expectError:   false,
+			name:         "Valid 4+2 encoding",
+			dataShards:   4,
+			parityShards: 2,
+			dataSize:     1024,
+			expectError:  false,
 		},
 		{
-			name:          "Valid 6+3 encoding",
-			dataShards:    6,
-			parityShards:  3,
-			dataSize:      4096,
-			expectError:   false,
+			name:         "Valid 6+3 encoding",
+			dataShards:   6,
+			parityShards: 3,
+			dataSize:     4096,
+			expectError:  false,
 		},
 		{
-			name:          "Small data",
-			dataShards:    4,
-			parityShards:  2,
-			dataSize:      10,
-			expectError:   false,
+			name:         "Small data",
+			dataShards:   4,
+			parityShards: 2,
+			dataSize:     10,
+			expectError:  false,
 		},
 		{
-			name:          "Large data",
-			dataShards:    4,
-			parityShards:  2,
-			dataSize:      1024 * 1024, // 1MB
-			expectError:   false,
+			name:         "Large data",
+			dataShards:   4,
+			parityShards: 2,
+			dataSize:     1024 * 1024, // 1MB
+			expectError:  false,
 		},
 	}
 
@@ -495,28 +495,28 @@ func TestErasureEncoder_MaxToleratedFailures(t *testing.T) {
 	logger := zap.NewNop()
 
 	tests := []struct {
-		name          string
-		dataShards    int
-		parityShards  int
-		expectedMax   int
+		name         string
+		dataShards   int
+		parityShards int
+		expectedMax  int
 	}{
 		{
-			name:          "4+2 configuration",
-			dataShards:    4,
-			parityShards:  2,
-			expectedMax:   2,
+			name:         "4+2 configuration",
+			dataShards:   4,
+			parityShards: 2,
+			expectedMax:  2,
 		},
 		{
-			name:          "6+3 configuration",
-			dataShards:    6,
-			parityShards:  3,
-			expectedMax:   3,
+			name:         "6+3 configuration",
+			dataShards:   6,
+			parityShards: 3,
+			expectedMax:  3,
 		},
 		{
-			name:          "8+4 configuration",
-			dataShards:    8,
-			parityShards:  4,
-			expectedMax:   4,
+			name:         "8+4 configuration",
+			dataShards:   8,
+			parityShards: 4,
+			expectedMax:  4,
 		},
 	}
 

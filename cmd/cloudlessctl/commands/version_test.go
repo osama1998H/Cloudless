@@ -42,28 +42,28 @@ func TestNewVersionCommand(t *testing.T) {
 // not cobra's output writer. This is intentional for simplicity.
 func TestVersionCommand_Output(t *testing.T) {
 	tests := []struct {
-		name           string
-		version        string
-		buildTime      string
-		gitCommit      string
+		name      string
+		version   string
+		buildTime string
+		gitCommit string
 	}{
 		{
-			name:       "standard version",
-			version:    "v1.0.0",
-			buildTime:  "2025-10-30T12:00:00Z",
-			gitCommit:  "abc123def456",
+			name:      "standard version",
+			version:   "v1.0.0",
+			buildTime: "2025-10-30T12:00:00Z",
+			gitCommit: "abc123def456",
 		},
 		{
-			name:       "dev version",
-			version:    "dev-dirty",
-			buildTime:  "unknown",
-			gitCommit:  "uncommitted",
+			name:      "dev version",
+			version:   "dev-dirty",
+			buildTime: "unknown",
+			gitCommit: "uncommitted",
 		},
 		{
-			name:       "empty values",
-			version:    "",
-			buildTime:  "",
-			gitCommit:  "",
+			name:      "empty values",
+			version:   "",
+			buildTime: "",
+			gitCommit: "",
 		},
 	}
 

@@ -69,12 +69,12 @@ func TestConcurrentSecretAccess(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateTestKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateTestKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateTestKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateTestKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -139,12 +139,12 @@ func TestConcurrentTokenGeneration(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateTestKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateTestKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateTestKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateTestKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -263,12 +263,12 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateTestKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateTestKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateTestKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateTestKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -417,12 +417,12 @@ func TestTokenUsageDecrement(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateTestKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateTestKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateTestKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateTestKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -485,12 +485,12 @@ func TestNoDeadlocks(t *testing.T) {
 
 	dataDir := t.TempDir()
 	config := &Config{
-		MasterKey:        generateTestKey(32),
-		MasterKeyID:      "test-key",
-		TokenSigningKey:  generateTestKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateTestKey(32),
+		MasterKeyID:     "test-key",
+		TokenSigningKey: generateTestKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)

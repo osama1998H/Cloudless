@@ -32,7 +32,7 @@ type RuntimeClass struct {
 
 // RuntimeClassManager handles runtime class operations
 type RuntimeClassManager struct {
-	logger          *zap.Logger
+	logger           *zap.Logger
 	supportedClasses map[string]*RuntimeClass
 }
 

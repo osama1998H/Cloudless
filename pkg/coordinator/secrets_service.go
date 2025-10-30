@@ -517,8 +517,8 @@ func (s *SecretsServiceServer) RotateMasterKey(ctx context.Context, req *api.Rot
 	// TODO(osama): Track number of secrets re-encrypted during rotation. See issue #17.
 	// Add Prometheus metrics and progress logging for re-encryption operations.
 	return &api.RotateMasterKeyResponse{
-		OldKey: oldProtoKey,
-		NewKey: newProtoKey,
+		OldKey:             oldProtoKey,
+		NewKey:             newProtoKey,
 		SecretsReEncrypted: 0, // To be implemented
 	}, nil
 }
@@ -603,7 +603,7 @@ func (s *SecretsServiceServer) GetSecretAuditLog(ctx context.Context, req *api.G
 	// TODO(osama): Implement pagination with continue_token and next_token. See issue #17.
 	// Audit logs can grow large - need cursor-based pagination similar to ListSecrets.
 	return &api.GetSecretAuditLogResponse{
-		Entries:   protoEntries,
+		Entries: protoEntries,
 		// NextToken: "", // To be implemented
 		NextToken: "", // Not implemented yet
 	}, nil

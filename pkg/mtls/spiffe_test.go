@@ -807,4 +807,3 @@ func TestMatchPattern(t *testing.T) {
 		})
 	}
 }
-

@@ -95,11 +95,11 @@ func (e *Engine) Evaluate(ctx PolicyContext, spec WorkloadSpec) (*EvaluationResu
 
 			switch policy.Action {
 			case PolicyActionDeny:
-			// Deny action - only mark as not allowed if there are violations
-			if len(policyResult.Violations) > 0 {
-				result.Allowed = false
-				result.Violations = append(result.Violations, policyResult.Violations...)
-			}
+				// Deny action - only mark as not allowed if there are violations
+				if len(policyResult.Violations) > 0 {
+					result.Allowed = false
+					result.Violations = append(result.Violations, policyResult.Violations...)
+				}
 
 			case PolicyActionAllow:
 				// Allow action - explicitly allowed (overrides default deny)

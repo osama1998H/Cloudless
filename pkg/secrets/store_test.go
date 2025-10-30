@@ -140,11 +140,11 @@ func TestInMemoryStore_Get(t *testing.T) {
 	store.Save(testSecret)
 
 	tests := []struct {
-		name      string
-		namespace string
+		name       string
+		namespace  string
 		secretName string
-		wantFound bool
-		wantError bool
+		wantFound  bool
+		wantError  bool
 	}{
 		{
 			name:       "found secret",

@@ -384,4 +384,3 @@ func BenchmarkBatch_vs_Individual(b *testing.B) {
 		}
 	})
 }
-

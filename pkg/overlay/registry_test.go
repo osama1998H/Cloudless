@@ -397,7 +397,7 @@ func TestServiceRegistry_RegisterEndpoint_NewAndUpdate(t *testing.T) {
 		PeerID:  "node-1",
 		Address: "192.168.1.10",
 		Port:    8080,
-		Weight:  20, // Changed weight
+		Weight:  20,                    // Changed weight
 		Health:  HealthStatusUnhealthy, // Changed health
 		Region:  "us-west",
 		Zone:    "zone-a",

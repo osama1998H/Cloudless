@@ -169,11 +169,11 @@ type ErasureConfig struct {
 // CLD-REQ-053: k=4 data shards + m=2 parity shards = 6 total shards minimum
 func DefaultErasureConfig() ErasureConfig {
 	return ErasureConfig{
-		Enabled:       false,                  // Opt-in feature
-		DataShards:    4,                      // k=4 data shards
-		ParityShards:  2,                      // m=2 parity shards (total 6)
-		MinNodeCount:  6,                      // CLD-REQ-053 requirement
-		ColdThreshold: 7 * 24 * time.Hour,    // 7 days without access = cold
+		Enabled:       false,              // Opt-in feature
+		DataShards:    4,                  // k=4 data shards
+		ParityShards:  2,                  // m=2 parity shards (total 6)
+		MinNodeCount:  6,                  // CLD-REQ-053 requirement
+		ColdThreshold: 7 * 24 * time.Hour, // 7 days without access = cold
 	}
 }
 
@@ -214,7 +214,7 @@ type StorageConfig struct {
 func DefaultStorageConfig() StorageConfig {
 	return StorageConfig{
 		DataDir:             "/var/lib/cloudless/storage",
-		ChunkSize:           4 * 1024 * 1024, // 4MB
+		ChunkSize:           4 * 1024 * 1024,        // 4MB
 		ReplicationFactor:   ReplicationFactorThree, // CLD-REQ-050 requires R=3 default
 		EnableCompression:   false,
 		RepairInterval:      1 * time.Hour,

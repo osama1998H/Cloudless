@@ -10,10 +10,10 @@ import (
 
 // BatchOperation represents a single operation in a batch
 type BatchOperation struct {
-	Type   string      `json:"type"`   // create_bucket, delete_bucket, put_object, delete_object
-	Bucket string      `json:"bucket"` // Bucket name
-	Key    string      `json:"key,omitempty"`
-	Value  []byte      `json:"value,omitempty"` // Serialized metadata
+	Type   string `json:"type"`   // create_bucket, delete_bucket, put_object, delete_object
+	Bucket string `json:"bucket"` // Bucket name
+	Key    string `json:"key,omitempty"`
+	Value  []byte `json:"value,omitempty"` // Serialized metadata
 }
 
 // MetadataBatch accumulates multiple metadata operations for batch execution
@@ -141,12 +141,12 @@ type BatchResult struct {
 
 // OperationResult represents the result of a single operation in a batch
 type OperationResult struct {
-	Index     int    // Index in the batch
-	Type      string // Operation type
-	Bucket    string // Bucket name
-	Key       string // Object key (for object operations)
-	Success   bool   // Whether operation succeeded
-	Error     string // Error message if failed
+	Index   int    // Index in the batch
+	Type    string // Operation type
+	Bucket  string // Bucket name
+	Key     string // Object key (for object operations)
+	Success bool   // Whether operation succeeded
+	Error   string // Error message if failed
 }
 
 // IsSuccess returns true if all operations succeeded

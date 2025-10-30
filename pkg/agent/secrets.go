@@ -122,9 +122,9 @@ func (sc *SecretsClient) GetSecret(ctx context.Context, namespace, name, audienc
 // generateAccessToken requests an access token from the coordinator
 func (sc *SecretsClient) generateAccessToken(ctx context.Context, namespace, name, audience string) (string, error) {
 	req := &api.GenerateAccessTokenRequest{
-		Namespace: namespace,
-		Name:      name,
-		Audience:  audience,
+		Namespace:  namespace,
+		Name:       name,
+		Audience:   audience,
 		TtlSeconds: 3600, // 1 hour
 		MaxUses:    100,  // Allow multiple uses
 	}

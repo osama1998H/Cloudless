@@ -105,12 +105,12 @@ func BenchmarkGetSecret(b *testing.B) {
 
 	dataDir := b.TempDir()
 	config := &Config{
-		MasterKey:        generateBenchKey(32),
-		MasterKeyID:      "bench-key",
-		TokenSigningKey:  generateBenchKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateBenchKey(32),
+		MasterKeyID:     "bench-key",
+		TokenSigningKey: generateBenchKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -164,12 +164,12 @@ func BenchmarkGetSecretWithLargeData(b *testing.B) {
 
 			dataDir := b.TempDir()
 			config := &Config{
-				MasterKey:        generateBenchKey(32),
-				MasterKeyID:      "bench-key",
-				TokenSigningKey:  generateBenchKey(32),
-				DefaultTokenTTL:  3600,
-				DataDir:          dataDir,
-				Logger:           logger,
+				MasterKey:       generateBenchKey(32),
+				MasterKeyID:     "bench-key",
+				TokenSigningKey: generateBenchKey(32),
+				DefaultTokenTTL: 3600,
+				DataDir:         dataDir,
+				Logger:          logger,
 			}
 
 			manager, err := NewManager(config)
@@ -219,12 +219,12 @@ func BenchmarkGenerateAccessToken(b *testing.B) {
 
 	dataDir := b.TempDir()
 	config := &Config{
-		MasterKey:        generateBenchKey(32),
-		MasterKeyID:      "bench-key",
-		TokenSigningKey:  generateBenchKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateBenchKey(32),
+		MasterKeyID:     "bench-key",
+		TokenSigningKey: generateBenchKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -452,12 +452,12 @@ func BenchmarkJWTSign(b *testing.B) {
 
 	dataDir := b.TempDir()
 	config := &Config{
-		MasterKey:        generateBenchKey(32),
-		MasterKeyID:      "bench-key",
-		TokenSigningKey:  generateBenchKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateBenchKey(32),
+		MasterKeyID:     "bench-key",
+		TokenSigningKey: generateBenchKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -482,12 +482,12 @@ func BenchmarkJWTValidate(b *testing.B) {
 
 	dataDir := b.TempDir()
 	config := &Config{
-		MasterKey:        generateBenchKey(32),
-		MasterKeyID:      "bench-key",
-		TokenSigningKey:  generateBenchKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateBenchKey(32),
+		MasterKeyID:     "bench-key",
+		TokenSigningKey: generateBenchKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)
@@ -548,12 +548,12 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 
 	dataDir := b.TempDir()
 	config := &Config{
-		MasterKey:        generateBenchKey(32),
-		MasterKeyID:      "bench-key",
-		TokenSigningKey:  generateBenchKey(32),
-		DefaultTokenTTL:  3600,
-		DataDir:          dataDir,
-		Logger:           logger,
+		MasterKey:       generateBenchKey(32),
+		MasterKeyID:     "bench-key",
+		TokenSigningKey: generateBenchKey(32),
+		DefaultTokenTTL: 3600,
+		DataDir:         dataDir,
+		Logger:          logger,
 	}
 
 	manager, err := NewManager(config)

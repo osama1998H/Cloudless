@@ -34,11 +34,11 @@ type PersistentServiceRegistry struct {
 
 // ServicePersistentState represents the state persisted to RAFT
 type ServicePersistentState struct {
-	Service   *Service    `json:"service"`
-	Endpoints []Endpoint  `json:"endpoints"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
-	DeletedAt *time.Time  `json:"deleted_at,omitempty"`
+	Service   *Service   `json:"service"`
+	Endpoints []Endpoint `json:"endpoints"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // NewPersistentServiceRegistry creates a new RAFT-backed service registry

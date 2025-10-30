@@ -23,7 +23,7 @@ func setupTestReplicationManager(t *testing.T) (*ReplicationManager, *ChunkStore
 	// Create config with R=3 (CLD-REQ-050)
 	config := StorageConfig{
 		DataDir:             tempDir,
-		ChunkSize:           64 * 1024, // 64KB
+		ChunkSize:           64 * 1024,              // 64KB
 		ReplicationFactor:   ReplicationFactorThree, // Test R=3
 		EnableCompression:   false,
 		RepairInterval:      1 * time.Hour,
@@ -250,22 +250,22 @@ func TestReplicationManager_GetReplicas(t *testing.T) {
 
 	// Test getting replicas
 	tests := []struct {
-		name           string
-		chunkID        string
-		expectedCount  int
-		wantError      bool
+		name          string
+		chunkID       string
+		expectedCount int
+		wantError     bool
 	}{
 		{
-			name:           "get replicas for existing chunk",
-			chunkID:        chunk.ID,
-			expectedCount:  3,
-			wantError:      false,
+			name:          "get replicas for existing chunk",
+			chunkID:       chunk.ID,
+			expectedCount: 3,
+			wantError:     false,
 		},
 		{
-			name:           "get replicas for non-existent chunk",
-			chunkID:        "non-existent-chunk-id",
-			expectedCount:  0,
-			wantError:      false, // Returns empty list, not error
+			name:          "get replicas for non-existent chunk",
+			chunkID:       "non-existent-chunk-id",
+			expectedCount: 0,
+			wantError:     false, // Returns empty list, not error
 		},
 	}
 

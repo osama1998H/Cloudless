@@ -46,6 +46,7 @@ type Container struct {
 	Labels      map[string]string
 	Annotations map[string]string
 	Resources   ResourceRequirements
+	LogPath     string // Path to container log file for log streaming
 }
 
 // ContainerState represents the state of a container

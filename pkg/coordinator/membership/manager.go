@@ -610,14 +610,14 @@ func (m *Manager) GetActiveNodeCount() int {
 // GetClusterStatus returns comprehensive cluster status information
 // CLD-REQ-053: Provides node count for erasure coding eligibility check
 type ClusterStatus struct {
-	TotalNodes    int               `json:"total_nodes"`
-	ActiveNodes   int               `json:"active_nodes"`
-	OfflineNodes  int               `json:"offline_nodes"`
-	DrainingNodes int               `json:"draining_nodes"`
-	FailedNodes   int               `json:"failed_nodes"`
-	NodesByState  map[string]int    `json:"nodes_by_state"`
-	NodesByRegion map[string]int    `json:"nodes_by_region"`
-	NodesByZone   map[string]int    `json:"nodes_by_zone"`
+	TotalNodes    int            `json:"total_nodes"`
+	ActiveNodes   int            `json:"active_nodes"`
+	OfflineNodes  int            `json:"offline_nodes"`
+	DrainingNodes int            `json:"draining_nodes"`
+	FailedNodes   int            `json:"failed_nodes"`
+	NodesByState  map[string]int `json:"nodes_by_state"`
+	NodesByRegion map[string]int `json:"nodes_by_region"`
+	NodesByZone   map[string]int `json:"nodes_by_zone"`
 }
 
 // GetClusterStatus returns the current cluster status

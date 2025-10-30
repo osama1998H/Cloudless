@@ -41,7 +41,8 @@
       "Bash(make build-cli:*)",
       "mcp__MCP_DOCKER__create_issue",
       "Read(//Users/osamamuhammed/.cloudless/**)",
-      "Bash(./build/cloudlessctl:*)"
+      "Bash(./build/cloudlessctl:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

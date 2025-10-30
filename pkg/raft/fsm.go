@@ -26,7 +26,7 @@ type Command struct {
 type MetadataCommand struct {
 	Op     string `json:"op"` // create_bucket, delete_bucket, put_object_meta, delete_object_meta
 	Bucket string `json:"bucket,omitempty"`
-	Key    string `json:"key,omitempty"`    // For object operations
+	Key    string `json:"key,omitempty"`   // For object operations
 	Value  []byte `json:"value,omitempty"` // Serialized Bucket or Object metadata
 }
 

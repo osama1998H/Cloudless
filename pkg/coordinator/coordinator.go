@@ -49,12 +49,12 @@ type Config struct {
 	CertificatesPath string        // Path to TLS certificates
 
 	// Secrets management configuration
-	SecretsEnabled         bool          // Enable secrets management service
-	SecretsMasterKey       []byte        // Master encryption key for secrets (32 bytes for AES-256)
-	SecretsMasterKeyID     string        // Master key identifier
-	SecretsTokenSigningKey []byte        // Signing key for secret access tokens
-	SecretsTokenTTL        time.Duration // TTL for secret access tokens
-	SecretsRotationEnabled bool          // Enable automatic master key rotation
+	SecretsEnabled          bool          // Enable secrets management service
+	SecretsMasterKey        []byte        // Master encryption key for secrets (32 bytes for AES-256)
+	SecretsMasterKeyID      string        // Master key identifier
+	SecretsTokenSigningKey  []byte        // Signing key for secret access tokens
+	SecretsTokenTTL         time.Duration // TTL for secret access tokens
+	SecretsRotationEnabled  bool          // Enable automatic master key rotation
 	SecretsRotationInterval time.Duration // Rotation interval
 }
 

@@ -211,9 +211,9 @@ func TestUnaryServerInterceptorWithCorrelation(t *testing.T) {
 	interceptor := UnaryServerInterceptorWithCorrelation(logger)
 
 	tests := []struct {
-		name              string
-		metadata          metadata.MD
-		expectRequestID   bool
+		name                string
+		metadata            metadata.MD
+		expectRequestID     bool
 		expectCorrelationID bool
 	}{
 		{
@@ -222,7 +222,7 @@ func TestUnaryServerInterceptorWithCorrelation(t *testing.T) {
 				RequestIDMetadataKey:     "req-123",
 				CorrelationIDMetadataKey: "corr-456",
 			}),
-			expectRequestID:   true,
+			expectRequestID:     true,
 			expectCorrelationID: true,
 		},
 		{
@@ -230,13 +230,13 @@ func TestUnaryServerInterceptorWithCorrelation(t *testing.T) {
 			metadata: metadata.New(map[string]string{
 				RequestIDMetadataKey: "req-only",
 			}),
-			expectRequestID:   true,
+			expectRequestID:     true,
 			expectCorrelationID: true, // Should use request ID
 		},
 		{
-			name:              "No metadata",
-			metadata:          nil,
-			expectRequestID:   true, // Should generate
+			name:                "No metadata",
+			metadata:            nil,
+			expectRequestID:     true, // Should generate
 			expectCorrelationID: true, // Should generate
 		},
 	}
@@ -361,9 +361,9 @@ func TestUnaryClientInterceptorWithCorrelation(t *testing.T) {
 	interceptor := UnaryClientInterceptorWithCorrelation()
 
 	tests := []struct {
-		name              string
-		setupContext      func(context.Context) context.Context
-		expectRequestID   bool
+		name                string
+		setupContext        func(context.Context) context.Context
+		expectRequestID     bool
 		expectCorrelationID bool
 	}{
 		{
@@ -373,7 +373,7 @@ func TestUnaryClientInterceptorWithCorrelation(t *testing.T) {
 				ctx = WithCorrelationID(ctx, "client-corr-456")
 				return ctx
 			},
-			expectRequestID:   true,
+			expectRequestID:     true,
 			expectCorrelationID: true,
 		},
 		{
@@ -381,7 +381,7 @@ func TestUnaryClientInterceptorWithCorrelation(t *testing.T) {
 			setupContext: func(ctx context.Context) context.Context {
 				return ctx
 			},
-			expectRequestID:   false,
+			expectRequestID:     false,
 			expectCorrelationID: false,
 		},
 	}

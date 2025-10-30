@@ -828,6 +828,377 @@ go test -v -tags=chaos ./test/chaos/...
 
 10. **Security warnings**: Never commit changes that remove security warnings in config files (auth_enabled, InsecureSkipVerify, etc.)
 
+## Specialized Agent Orchestration
+
+Cloudless uses specialized Claude Code agents for different aspects of development. Each agent has its own context window, system prompt, and expertise area, ensuring focused and high-quality work.
+
+### Available Agents
+
+Six specialized agents are available in `.claude/agents/`:
+
+| **Agent** | **File** | **Purpose** | **Key Expertise** |
+|-----------|----------|-------------|-------------------|
+| **Product Owner** | `product-owner.md` | Requirements validation, feature prioritization | CLD-REQ-* mapping, MVP scope, tenet alignment |
+| **Architect** | `architect.md` | System design, architecture decisions | Three-plane architecture, performance, design docs |
+| **Engineer** | `engineer.md` | Code implementation | GO_ENGINEERING_SOP.md compliance, 70%+ coverage |
+| **Tech Lead** | `tech-lead.md` | Code review, quality enforcement | Performance, concurrency, security review |
+| **Unit Tester** | `unit-tester.md` | Test code development | Table-driven tests, race detector, edge cases |
+| **Documenter** | `documenter.md` | Documentation creation | Design docs, API reference, user guides |
+
+### When to Use Each Agent
+
+**Decision Tree**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ NEW FEATURE REQUEST                                         │
+│ ↓                                                           │
+│ 1. Product Owner - Validate requirements                   │
+│    • Map to CLD-REQ-* or validate new requirement          │
+│    • Check MVP scope (P0-P6)                               │
+│    • Verify tenet alignment (T1-T4)                        │
+│    • Define acceptance criteria                            │
+│                                                             │
+│ If APPROVED → Continue                                      │
+│ If REJECTED → Explain to user, suggest alternatives        │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Architect - Design solution                             │
+│    • Create design document (§16.2 template)               │
+│    • Mermaid diagrams for architecture                     │
+│    • Performance analysis (P50/P95/P99)                    │
+│    • Security considerations                               │
+│    • Alternatives considered                               │
+│                                                             │
+│ Output: Design document in docs/design/CLD-REQ-*.md       │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Engineer - Implement code                               │
+│    • Follow GO_ENGINEERING_SOP.md §3-§12                   │
+│    • Error handling (§4)                                   │
+│    • Concurrency patterns (§5)                             │
+│    • Structured logging and metrics (§9)                   │
+│    • Security compliance (§8)                              │
+│                                                             │
+│ Output: Implementation in pkg/                             │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Unit Tester - Write tests                               │
+│    • Table-driven tests                                    │
+│    • 70%+ statement coverage                               │
+│    • Race detector passes                                  │
+│    • Edge cases and error paths                            │
+│    • Appropriate build tags                                │
+│                                                             │
+│ Output: *_test.go files with comprehensive coverage        │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 5. Tech Lead - Review code                                 │
+│    • Correctness and error handling                        │
+│    • Concurrency safety (goroutines, channels)             │
+│    • Performance (meets NFR-P1 targets)                    │
+│    • Security (mTLS, validation, policy)                   │
+│    • Test coverage and quality                             │
+│    • Architecture alignment                                │
+│                                                             │
+│ Output: Approval or feedback for revision                  │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 6. Documenter - Document implementation                    │
+│    • Update design document to "Implemented"               │
+│    • API reference (godoc, protobuf)                       │
+│    • User guide section                                    │
+│    • Runbook if operational complexity                     │
+│    • Package README if new package                         │
+│                                                             │
+│ Output: Documentation in docs/, pkg/ godoc, examples/      │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+                 COMPLETE
+```
+
+### Agent Invocation Guidelines
+
+**Automatic Invocation** (Claude proactively uses agents):
+
+Agents are invoked automatically when their description patterns match the task:
+
+- **Product Owner**: User mentions requirements, features, CLD-REQ-*, MVP, scope
+- **Architect**: Adding packages, changing protocols, architectural decisions
+- **Engineer**: Implementing code, fixing bugs, adding functionality
+- **Tech Lead**: Code review requested, PR feedback, quality concerns
+- **Unit Tester**: Writing tests, improving coverage, test failures
+- **Documenter**: Creating docs, updating design docs, API reference
+
+**Manual Invocation** (User explicitly requests):
+
+Users can explicitly request agents:
+```bash
+# User messages that trigger specific agents
+"Product Owner: Is GPU scheduling in MVP scope?"
+"Architect: Design a distributed object store"
+"Engineer: Implement the scheduler scoring function"
+"Tech Lead: Review the concurrent workload processing code"
+"Unit Tester: Write tests for the secrets manager"
+"Documenter: Create user guide for secrets management"
+```
+
+**Parallel Agent Execution**:
+
+For complex tasks, multiple agents can work in parallel when there are no dependencies:
+
+```
+Example: "Implement GPU scheduling support"
+
+SEQUENTIAL workflow (default):
+  Product Owner → Architect → Engineer → Unit Tester → Tech Lead → Documenter
+
+PARALLEL opportunities:
+  1. Product Owner validates requirements
+  2. [PARALLEL] Architect designs solution + Tech Lead reviews existing GPU code
+  3. Engineer implements
+  4. [PARALLEL] Unit Tester writes tests + Documenter drafts API reference
+  5. Tech Lead reviews implementation
+  6. Documenter finalizes documentation
+```
+
+### Agent Coordination Rules
+
+**MANDATORY Sequential Ordering**:
+
+1. **Product Owner ALWAYS validates first** - No implementation without requirement validation
+2. **Architect designs before Engineer implements** - No code without design for complex features
+3. **Unit Tester writes tests during/after Engineer implements** - Never after PR submission
+4. **Tech Lead reviews after Engineer + Unit Tester complete** - Review with tests included
+5. **Documenter documents after implementation stabilizes** - Don't document unstable APIs
+
+**Collaboration Patterns**:
+
+| **Pattern** | **Agents Involved** | **When to Use** |
+|-------------|-------------------|----------------|
+| **Quick Fix** | Engineer → Tech Lead | Bug fixes, small refactors (< 50 LOC) |
+| **Feature Development** | Product Owner → Architect → Engineer → Unit Tester → Tech Lead → Documenter | New features, API changes, architectural changes |
+| **Test Improvement** | Unit Tester → Tech Lead | Coverage gaps, test refactoring |
+| **Documentation Update** | Documenter → Tech Lead | Docs-only changes, clarifications |
+| **Design Review** | Architect → Tech Lead | Design validation before implementation |
+| **Requirements Clarification** | Product Owner → Architect | Scope questions, MVP decisions |
+
+### Workflow Examples
+
+#### Example 1: New Feature - Distributed Caching Layer
+
+**Task**: "Add distributed caching to reduce coordinator load"
+
+**Workflow**:
+```
+1. Product Owner Agent
+   - Validates against CLD-REQ-* (no existing requirement)
+   - Checks MVP scope (post-MVP: P7)
+   - Verifies tenet alignment (T3: graceful degradation ✅)
+   - Defines acceptance criteria
+   - Output: Feature approved for P7, maps to new CLD-REQ-090
+
+2. Architect Agent
+   - Designs caching architecture
+   - Evaluates Redis vs memcached vs custom
+   - Mermaid diagrams for data flow
+   - Performance analysis (cache hit ratio, latency)
+   - Security: mTLS for cache connections
+   - Output: docs/design/CLD-REQ-090-DISTRIBUTED-CACHE.md
+
+3. Engineer Agent
+   - Implements pkg/cache/
+   - Redis client wrapper with mTLS
+   - Cache invalidation logic
+   - Integration with coordinator
+   - Structured logging and Prometheus metrics
+   - Output: pkg/cache/*.go (500 LOC)
+
+4. Unit Tester Agent
+   - Table-driven tests for cache operations
+   - Mock Redis for unit tests
+   - Race detector tests for concurrent access
+   - Error handling tests (Redis down, network partition)
+   - Coverage: 82% statement coverage
+   - Output: pkg/cache/*_test.go (600 LOC)
+
+5. Tech Lead Agent
+   - Reviews implementation
+   - Checks: concurrency (✅), error handling (✅), performance (✅)
+   - Verifies tests (✅ 82% coverage, race detector passes)
+   - Approval with minor feedback: Add context timeout for Redis operations
+   - Output: Approved with comments
+
+6. Documenter Agent
+   - Updates design doc to "Implemented"
+   - Godoc for pkg/cache/
+   - User guide: "Enabling Distributed Caching"
+   - Configuration example in config/cache-example.yaml
+   - Runbook: "Debugging Cache Issues"
+   - Output: docs/guides/caching.md, runbook entry
+
+Status: COMPLETE ✅
+```
+
+#### Example 2: Bug Fix - Race Condition in Scheduler
+
+**Task**: "Fix race condition in scheduler node scoring"
+
+**Workflow** (Fast Track):
+```
+1. Engineer Agent
+   - Analyzes pkg/scheduler/scorer.go:145
+   - Identifies: shared map access without mutex
+   - Fix: Add sync.RWMutex for node score cache
+   - Adds defer unlock pattern
+   - Output: pkg/scheduler/scorer.go (10 LOC changed)
+
+2. Unit Tester Agent (Parallel with Engineer)
+   - Adds race detector test
+   - Test: 100 concurrent score calculations
+   - Verifies: No data races, correct results
+   - Output: pkg/scheduler/scorer_test.go (50 LOC added)
+
+3. Tech Lead Agent
+   - Reviews fix: Mutex placement correct ✅
+   - Runs: go test -race ./pkg/scheduler/... ✅
+   - Checks performance: No regression ✅
+   - Approval: Immediate approval
+   - Output: LGTM
+
+Status: COMPLETE ✅ (No Product Owner/Architect/Documenter needed for bug fix)
+```
+
+#### Example 3: Documentation - API Reference for Secrets
+
+**Task**: "Document the SecretsService gRPC API"
+
+**Workflow** (Docs-Only):
+```
+1. Documenter Agent
+   - Reads pkg/api/cloudless.proto (SecretsService)
+   - Generates API reference from protobuf
+   - Adds usage examples for each RPC
+   - Creates quickstart guide
+   - Documents error codes and retry logic
+   - Output: docs/api/secrets.md (400 lines)
+
+2. Tech Lead Agent
+   - Reviews documentation for accuracy
+   - Verifies examples compile
+   - Checks alignment with implementation
+   - Approval: Minor typo fixes
+   - Output: Approved
+
+Status: COMPLETE ✅ (No Product Owner/Architect/Engineer/Unit Tester needed)
+```
+
+### Agent Communication
+
+Agents communicate through:
+
+1. **Shared Context**: All agents read CLAUDE.md, GO_ENGINEERING_SOP.md, Cloudless.MD
+2. **Artifacts**: Design docs, code, tests, documentation
+3. **Status Updates**: Each agent reports completion and artifacts produced
+4. **Feedback Loops**: Tech Lead provides feedback → Engineer revises → Unit Tester updates tests
+
+**Handoff Format**:
+
+When one agent completes and hands off to the next:
+
+```markdown
+## [Agent Name] - COMPLETED ✅
+
+**Task**: [Description]
+
+**Artifacts Produced**:
+- [File 1]: [Description]
+- [File 2]: [Description]
+
+**Key Decisions**:
+- [Decision 1]: [Rationale]
+- [Decision 2]: [Rationale]
+
+**Next Agent**: [Name]
+**Handoff Context**: [What the next agent needs to know]
+
+**Open Questions** (if any):
+- [Question 1]
+- [Question 2]
+```
+
+### Task Complexity Assessment
+
+Not all tasks require all agents. Use this guide:
+
+| **Complexity** | **LOC** | **Agents Required** | **Example** |
+|----------------|---------|-------------------|-------------|
+| **Trivial** | < 20 | Engineer + Tech Lead | Fix typo, update comment |
+| **Simple** | 20-100 | Engineer + Unit Tester + Tech Lead | Bug fix, small refactor |
+| **Moderate** | 100-500 | Architect + Engineer + Unit Tester + Tech Lead | New API endpoint, feature extension |
+| **Complex** | 500-2000 | Product Owner + Architect + Engineer + Unit Tester + Tech Lead + Documenter | New subsystem, architectural change |
+| **Major** | > 2000 | Full workflow + multiple iterations | New storage engine, security model overhaul |
+
+### Agent Standards Compliance
+
+Each agent enforces specific GO_ENGINEERING_SOP.md sections:
+
+| **Agent** | **SOP Sections Enforced** | **Validation** |
+|-----------|---------------------------|----------------|
+| **Product Owner** | §1 (Purpose), §22 (Requirements Mapping) | All features map to CLD-REQ-*, MVP scope validated |
+| **Architect** | §2 (Repository Layout), §16 (Design Control) | Design docs follow §16.2 template, diagrams included |
+| **Engineer** | §3-§12 (Coding Standards to Testing) | Code passes lint, 70%+ coverage, error handling correct |
+| **Tech Lead** | §15 (Code Review), §13 (Performance) | Performance targets met, concurrency safe, security verified |
+| **Unit Tester** | §12 (Testing Policy) | Table-driven tests, race detector, appropriate build tags |
+| **Documenter** | §3.4 (Comments), §16.2 (Design Template) | Godoc complete, design docs updated, examples provided |
+
+### Performance Considerations
+
+Agent invocation overhead is minimal (< 1s per agent), but for optimal performance:
+
+- **Batch related changes**: Don't invoke agents for each tiny change
+- **Use fast-track workflows**: Simple bugs don't need Product Owner/Architect
+- **Parallel execution**: Run independent agents (Unit Tester + Documenter) in parallel
+- **Cache agent context**: Agents remember project context across invocations
+
+### Troubleshooting Agent Issues
+
+**Issue: Agent produces incorrect output**
+
+1. Check agent has access to latest CLAUDE.md, GO_ENGINEERING_SOP.md
+2. Verify agent description pattern matches task
+3. Provide more explicit handoff context
+4. Use manual invocation with specific instructions
+
+**Issue: Agent misses requirements**
+
+1. Product Owner agent should be invoked first
+2. Ensure CLD-REQ-* mapping is explicit
+3. Reference Cloudless.MD sections in task description
+
+**Issue: Agent workflow feels slow**
+
+1. Assess task complexity (see table above)
+2. Use fast-track workflows for simple tasks
+3. Consider parallel agent execution
+4. Batch related changes
+
+### Agent Updates
+
+Agents are versioned with the project. If you need to update an agent:
+
+1. Edit `.claude/agents/<agent-name>.md`
+2. Update agent description or tools
+3. Test with sample task
+4. Document changes in `.claude/README.md`
+
+For details on agent capabilities and usage, see `.claude/README.md`.
+
 ## Performance Targets
 
 - Scheduler decisions: 200ms P50, 800ms P95 (5k nodes)

@@ -60,12 +60,12 @@ type ManifestResourceCapacity struct {
 }
 
 type ManifestPlacement struct {
-	Regions         []string            `yaml:"regions"`
-	Zones           []string            `yaml:"zones"`
-	NodeSelector    map[string]string   `yaml:"node_selector"`
-	Affinity        []ManifestAffinity  `yaml:"affinity"`
-	AntiAffinity    []ManifestAffinity  `yaml:"anti_affinity"`
-	SpreadTopology  string              `yaml:"spread_topology"`
+	Regions        []string           `yaml:"regions"`
+	Zones          []string           `yaml:"zones"`
+	NodeSelector   map[string]string  `yaml:"node_selector"`
+	Affinity       []ManifestAffinity `yaml:"affinity"`
+	AntiAffinity   []ManifestAffinity `yaml:"anti_affinity"`
+	SpreadTopology string             `yaml:"spread_topology"`
 }
 
 type ManifestAffinity struct {
@@ -100,17 +100,17 @@ type ManifestHealthCheck struct {
 	HTTP             *ManifestHTTPProbe `yaml:"http"`
 	TCP              *ManifestTCPProbe  `yaml:"tcp"`
 	Exec             *ManifestExecProbe `yaml:"exec"`
-	InitialDelay     string             `yaml:"initial_delay"`     // Duration string like "15s"
-	Period           string             `yaml:"period"`            // Duration string like "10s"
-	Timeout          string             `yaml:"timeout"`           // Duration string like "3s"
+	InitialDelay     string             `yaml:"initial_delay"` // Duration string like "15s"
+	Period           string             `yaml:"period"`        // Duration string like "10s"
+	Timeout          string             `yaml:"timeout"`       // Duration string like "3s"
 	SuccessThreshold int32              `yaml:"success_threshold"`
 	FailureThreshold int32              `yaml:"failure_threshold"`
 }
 
 type ManifestHTTPProbe struct {
-	Path    string              `yaml:"path"`
-	Port    int32               `yaml:"port"`
-	Scheme  string              `yaml:"scheme"` // HTTP or HTTPS
+	Path    string               `yaml:"path"`
+	Port    int32                `yaml:"port"`
+	Scheme  string               `yaml:"scheme"` // HTTP or HTTPS
 	Headers []ManifestHTTPHeader `yaml:"headers"`
 }
 

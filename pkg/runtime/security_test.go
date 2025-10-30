@@ -637,18 +637,18 @@ func TestRunAsUser(t *testing.T) {
 // TestRunAsNonRoot tests non-root user enforcement
 func TestRunAsNonRoot(t *testing.T) {
 	tests := []struct {
-		name         string
-		userID       int64
+		name          string
+		userID        int64
 		expectNonRoot bool
 	}{
 		{
-			name:         "non-root user",
-			userID:       1000,
+			name:          "non-root user",
+			userID:        1000,
 			expectNonRoot: true,
 		},
 		{
-			name:         "root user",
-			userID:       0,
+			name:          "root user",
+			userID:        0,
 			expectNonRoot: false,
 		},
 	}
