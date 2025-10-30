@@ -67,6 +67,9 @@ make compose-logs
 make compose-down
 ```
 
+**Note on Bootstrap Tokens:**
+The local docker-compose environment automatically generates bootstrap tokens for node enrollment via the `CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS=1` environment variable. This is ONLY for development convenience. Production deployments must NEVER enable this flag and should use the proper token management API with short-lived, scoped tokens (see Security section below).
+
 ### Code Quality
 ```bash
 # Format code (MUST run before committing)
@@ -214,6 +217,7 @@ go test -v ./pkg/scheduler/
 - NO plaintext communication - mTLS everywhere
 - Validate ALL external input
 - NEVER hardcode secrets - use environment variables or secrets manager
+- NEVER enable bootstrap token auto-generation in production (`CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS`)
 - Run with least privilege
 - Use policy engine for admission control
 

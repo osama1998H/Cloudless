@@ -42,6 +42,10 @@ services:
       - CLOUDLESS_SECRETS_TOKEN_TTL=1h
       - CLOUDLESS_SECRETS_ROTATION_ENABLED=false  # Disable auto-rotation in dev
       - CLOUDLESS_SECRETS_ROTATION_INTERVAL=2160h  # 90 days (when enabled)
+      # CLD-REQ-063 & Issue #14: Bootstrap token generation (DEVELOPMENT ONLY)
+      # SECURITY WARNING: Only enable in development, NEVER in production
+      # Production deployments MUST use proper token management API
+      - CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS=1  # DEVELOPMENT ONLY - NEVER USE IN PRODUCTION
     volumes:
       - coordinator-data:/data
       - ./config/coordinator.yaml:/etc/cloudless/coordinator.yaml:ro

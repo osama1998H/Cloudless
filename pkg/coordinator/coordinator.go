@@ -227,23 +227,6 @@ func New(config *Config) (*Coordinator, error) {
 	}
 	c.tokenManager = tokenManager
 
-	// Generate a bootstrap token for development/testing
-	// TODO(osama): Remove bootstrap token auto-generation in production. See issue #14.
-	// SECURITY WARNING: This generates a long-lived token (365 days, 999 uses) for development only.
-	// Production deployments must use the proper token management API with short-lived tokens
-	// and proper audience restrictions (CLD-REQ-063).
-	bootstrapToken, err := tokenManager.GenerateToken("", "", "", "", 365*24*time.Hour, 999)
-	if err != nil {
-		config.Logger.Warn("Failed to generate bootstrap token", zap.Error(err))
-	} else {
-		// SECURITY: Never log raw tokens, only token IDs
-		config.Logger.Info("Generated bootstrap token for development",
-			zap.String("token_id", bootstrapToken.ID),
-			zap.Time("expires_at", bootstrapToken.ExpiresAt),
-			zap.Int("max_uses", bootstrapToken.MaxUses),
-		)
-	}
-
 	// Initialize RAFT Store (must be before membership manager)
 	config.Logger.Info("Initializing RAFT Store")
 	raftConfig := &raft.Config{

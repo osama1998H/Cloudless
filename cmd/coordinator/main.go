@@ -197,6 +197,10 @@ func run(cmd *cobra.Command, args []string) error {
 	// Generate bootstrap tokens for development/testing (only if explicitly enabled)
 	// SECURITY WARNING: Only enable in development environments, never in production
 	if os.Getenv("CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS") == "1" {
+		logger.Warn("Bootstrap token auto-generation enabled",
+			zap.String("security_warning", "DEVELOPMENT ONLY - Never enable in production"),
+			zap.String("env_var", "CLOUDLESS_GENERATE_BOOTSTRAP_TOKENS=1"),
+		)
 		if err := generateBootstrapTokens(coord, logger); err != nil {
 			logger.Warn("Failed to generate bootstrap tokens", zap.Error(err))
 		}
@@ -382,7 +386,8 @@ func generateBootstrapTokens(coord *coordinator.Coordinator, logger *zap.Logger)
 		logger.Info("Generated bootstrap token",
 			zap.String("node_id", agent.NodeID),
 			zap.String("node_name", agent.NodeName),
-			zap.String("token", token.Token),
+			zap.String("token_id", token.ID),
+			zap.Time("expires_at", token.ExpiresAt),
 		)
 	}
 
