@@ -250,7 +250,7 @@ func (a *Agent) StreamLogs(req *api.StreamLogsRequest, stream grpc.ServerStreami
 
 			entry := &api.LogEntry{
 				Timestamp: timestamppb.New(logEntry.Timestamp),
-				Line:      logEntry.Log,
+				Line:      logEntry.Line,
 				Stream:    logEntry.Stream,
 			}
 
