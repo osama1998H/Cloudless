@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1558,9 +1559,15 @@ func (a *Agent) GetSecretsClient() *SecretsClient {
 func (a *Agent) connectToCoordinatorOverlay(ctx context.Context) error {
 	a.logger.Info("Connecting to coordinator overlay network")
 
-	// Extract coordinator address (remove port for now, would need proper parsing)
-	// In production, would get overlay address from coordinator enrollment response
+	// Extract coordinator hostname from address
+	// coordAddr might be "coordinator:8080" or just "coordinator"
+	// We need only the hostname for the overlay peer, not the gRPC port
 	coordAddr := a.config.CoordinatorAddr
+	coordHost, _, err := net.SplitHostPort(coordAddr)
+	if err != nil {
+		// No port present, use address as-is
+		coordHost = coordAddr
+	}
 
 	// Get NAT info for this agent
 	natInfo := a.natTraversal.GetNATInfo()
@@ -1574,9 +1581,9 @@ func (a *Agent) connectToCoordinatorOverlay(ctx context.Context) error {
 	// Create peer entry for coordinator
 	coordPeer := &overlay.Peer{
 		ID:       "coordinator", // Would get from enrollment
-		Address:  coordAddr,
-		Port:     9090, // Default coordinator overlay port
-		Region:   "",   // Would get from enrollment
+		Address:  coordHost,     // Hostname only, no port
+		Port:     9090,          // Default coordinator overlay port
+		Region:   "",            // Would get from enrollment
 		Zone:     "",
 		Status:   overlay.PeerStatusDisconnected,
 		Metadata: map[string]string{"role": "coordinator"},

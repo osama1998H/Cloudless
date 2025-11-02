@@ -1,0 +1,43 @@
+# Prometheus configuration for Cloudless HA cluster monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'cloudless-ha-local'
+    monitor: 'cloudless-monitor'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Scrape configurations
+scrape_configs:
+  # Coordinator metrics - all 3 coordinators
+  - job_name: 'coordinators'
+    static_configs:
+      - targets:
+          - 'coordinator-1:9090'
+          - 'coordinator-2:9090'
+          - 'coordinator-3:9090'
+        labels:
+          service: 'coordinator'
+
+  # Agent metrics
+  - job_name: 'agents'
+    static_configs:
+      - targets:
+          - 'agent-1:9092'
+          - 'agent-2:9092'
+          - 'agent-3:9092'
+        labels:
+          service: 'agent'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'

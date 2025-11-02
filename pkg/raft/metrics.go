@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/osama1998H/Cloudless/pkg/observability"
 	"github.com/hashicorp/raft"
+	"github.com/osama1998H/Cloudless/pkg/observability"
 	"go.uber.org/zap"
 )
 

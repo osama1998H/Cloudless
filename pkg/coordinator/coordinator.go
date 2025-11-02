@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	hashicorpraft "github.com/hashicorp/raft"
 	"github.com/osama1998H/Cloudless/pkg/api"
 	"github.com/osama1998H/Cloudless/pkg/coordinator/membership"
 	"github.com/osama1998H/Cloudless/pkg/mtls"
@@ -18,7 +19,6 @@ import (
 	"github.com/osama1998H/Cloudless/pkg/raft"
 	"github.com/osama1998H/Cloudless/pkg/scheduler"
 	"github.com/osama1998H/Cloudless/pkg/secrets"
-	hashicorpraft "github.com/hashicorp/raft"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

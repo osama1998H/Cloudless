@@ -30,7 +30,10 @@ services:
       - CLOUDLESS_DATA_DIR=/data
       - CLOUDLESS_BOOTSTRAP=true
       - CLOUDLESS_TOKEN_SECRET=dev-secret-fixed-key-for-testing
-      - CLOUDLESS_TLS_ENABLED=false  # Disable TLS for local testing
+      - CLOUDLESS_TLS_ENABLED=true  # Enable TLS for secure communication (CLD-REQ-060)
+      - CLOUDLESS_TLS_CERT=/etc/cloudless/certs/coordinator.crt
+      - CLOUDLESS_TLS_KEY=/etc/cloudless/certs/coordinator.key
+      - CLOUDLESS_TLS_CA=/etc/cloudless/certs/ca.crt
       # CLD-REQ-063: Secrets Management Configuration
       # SECURITY WARNING: These are DEVELOPMENT keys only!
       # NEVER use these in production - generate unique keys per deployment

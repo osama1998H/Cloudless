@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/osama1998H/Cloudless/pkg/api"
 	"github.com/osama1998H/Cloudless/pkg/secrets"
-	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

@@ -49,7 +49,11 @@
       "Bash(gh run view:*)",
       "Bash(gh api:*)",
       "Bash(gh pr view:*)",
-      "Read(//Users/osamamuhammed/go/bin/**)"
+      "Read(//Users/osamamuhammed/go/bin/**)",
+      "Read(//Users/osamamuhammed/**)",
+      "Bash(make clean:*)",
+      "Read(//private/tmp/**)",
+      "Bash(docker compose:*)"
     ],
     "deny": [],
     "ask": []
